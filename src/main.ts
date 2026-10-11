@@ -219,6 +219,9 @@ renderer.setAnimationLoop((now: number) => {
     if (framePosition >= meta.frameCount - 1) { playing = false; updatePlayButton(); }
   }
   controls.update(); cameraQuaternion.copy(camera.quaternion);
+  // Keep the selected-star torus face-on to the current view, even while
+  // playback is paused and the user is orbiting the camera.
+  if (selectionRing.visible) selectionRing.quaternion.copy(cameraQuaternion);
   if (1 - Math.abs(lastDiffractionOrientation.dot(cameraQuaternion)) > 1e-7) {
     for (let i = 0; i < meta.particleCount; i++) {
       setMatrix(diffraction, i, renderedPositions[i * 3], renderedPositions[i * 3 + 1], renderedPositions[i * 3 + 2], renderedDiffractionSizes[i], cameraQuaternion);
