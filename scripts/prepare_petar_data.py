@@ -61,7 +61,7 @@ def main():
             for lost_slot in np.flatnonzero(before & ~after):
                 if gain < 2.0: continue
                 survivor_id=int(ids[survivor_slot]); is_center=survivor_id==centers[fi]
-                events.append({'preIndex':fi-1,'postIndex':fi,'timeStartMyr':float(times[fi-1]),'timeEndMyr':float(times[fi]),'disappearedId':int(ids[lost_slot]),'survivorId':survivor_id,'survivorMassGainMsun':gain,'centralMergerCandidate':bool(is_center),'label':'VMS-associated candidate' if is_center else 'companion merger candidate'})
+                events.append({'preIndex':fi-1,'postIndex':fi,'timeStartMyr':float(times[fi-1]),'timeEndMyr':float(times[fi]),'incomingId':int(ids[lost_slot]),'survivorId':survivor_id,'survivorMassGainMsun':gain,'centralMergerCandidate':bool(is_center),'label':'VMS-associated candidate' if is_center else 'companion merger candidate'})
         # Prefer the BSE event log when present: it gives event times and the
         # two participating particle IDs, unlike snapshot-only mass inference.
         bse_member=next((m for m in archive.getmembers() if Path(m.name).name.startswith('data.bse.')),None)
@@ -76,12 +76,13 @@ def main():
                     pre=max(0,min(len(times)-2,int(np.searchsorted(times,event_time,side='right')-1))); post=pre+1
                     slot_by_id={int(pid):id_to_slot.get(int(pid)) for pid in participants}
                     lost=[pid for pid,slot in slot_by_id.items() if slot is not None and frames[pre,slot,10]>.5 and frames[post,slot,10]<.5]
-                    if lost: incoming=lost[0]; survivor=next((pid for pid in participants if pid!=incoming),participants[0])
-                    else:
-                        masses=[frames[pre,id_to_slot[pid],6] if id_to_slot.get(pid) is not None else float('inf') for pid in participants]
-                        incoming=participants[int(np.argmin(masses))]; survivor=participants[1] if incoming==participants[0] else participants[0]
+                    # Highlight the lower-mass participant before coalescence.
+                    # The more massive participant may itself be the current
+                    # VMS; tracking it would pin the red mark at the origin.
+                    masses=[frames[pre,id_to_slot[pid],6] if id_to_slot.get(pid) is not None else float('inf') for pid in participants]
+                    incoming=participants[int(np.argmin(masses))]; survivor=participants[1] if incoming==participants[0] else participants[0]
                     central=survivor==centers[post]
-                    exact.append({'preIndex':pre,'postIndex':post,'timeStartMyr':float(times[pre]),'timeEndMyr':float(times[post]),'eventTimeMyr':event_time,'disappearedId':incoming,'survivorId':survivor,'participantIds':participants,'survivorMassGainMsun':None,'centralMergerCandidate':bool(central),'source':'BSE Coalescence','label':'VMS-associated BSE coalescence' if central else 'BSE coalescence'})
+                    exact.append({'preIndex':pre,'postIndex':post,'timeStartMyr':float(times[pre]),'timeEndMyr':float(times[post]),'eventTimeMyr':event_time,'incomingId':incoming,'survivorId':survivor,'participantIds':participants,'survivorMassGainMsun':None,'centralMergerCandidate':bool(central),'source':'BSE Coalescence','label':'VMS-associated BSE coalescence' if central else 'BSE coalescence'})
                 if exact: events=exact
         (args.out/'events.json').write_text(json.dumps(events,separators=(',',':'))+'\n')
         binary=args.out/'snapshots.bin'; frames.tofile(binary)

@@ -29,7 +29,7 @@ Interpolation provides visual continuity only; it does not recover close orbital
 
 The scene requests Three.js `WebGPURenderer`; this selects a WebGPU backend where available and falls back to WebGL 2 when required by the browser/device. The app reports the active backend in the scene header.
 
-The central-mass history is clickable to seek. Red timeline ticks and the next-event notice use BSE coalescence times. A red trajectory and halo identify the incoming participant in the snapshots before the event; selected particles get a bright gold ring. Click a particle to monitor its position, velocity, mass, BSE type, radius and luminosity. BSE event logs provide event time and participant IDs, while snapshots provide the changing particle properties; event times are bracketed by the saved snapshots.
+The central-mass history is clickable to seek. Red timeline ticks, the event jump menu and the persistent 3D forecast use BSE coalescence times. A red trajectory and red particle mark the lower-mass incoming participant before the event; selected particles get a bright cyan ring. Clicking the selected particle again clears the selection. Click a particle to monitor its position, velocity, mass, BSE type, radius and luminosity. BSE event logs provide event time and participant IDs, while snapshots provide the changing particle properties; event times are bracketed by the saved snapshots.
 
 ## Production build and Pages
 
