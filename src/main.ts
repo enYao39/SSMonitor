@@ -28,7 +28,6 @@ app.innerHTML = `
       <div id="scene"></div>
       <div class="scene-caption"><span class="caption-vms"></span> CENTRAL VMS <i></i><span id="color-mode-label">BLACKBODY COLOUR</span><span class="caption-note">DISPLAY SIZES ARE EXAGGERATED</span></div>
       <div class="event-forecast" id="event-forecast">NEXT MERGER · LOADING EVENT DATA</div>
-      <div class="merger-label" id="merger-label"></div>
       <div class="scene-legend"><span><i class="legend-participants"></i>MERGER PARTICIPANTS</span><span><i class="legend-next"></i>NEXT EVENT INCOMING STAR</span></div>
       <div class="axis-note">X · Y · Z <span>/</span> pc</div>
       <div class="loading" id="loading"><div class="loader"></div><b>Loading the simulation record</b><span>793 saved snapshots · ID-aligned particle cache</span></div>
@@ -206,16 +205,14 @@ function putFrame(position: number, updateUi = true) {
   document.querySelector('#frame-summary')!.textContent = `${snapshotLabel} · ${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} YR`;
   document.querySelector('#mass-chart-current')!.textContent=`${time.toLocaleString('en-US',{maximumFractionDigits:0})} yr`;
   updateTargetMonitor(); drawMassChart(framePosition);
-  const eventNow=mode==='raw'?mergerEvents.find(e=>displayFrame===e.preIndex):mergerEvents.find(e=>lower===e.preIndex&&upper===e.postIndex);
-  const eventLabel=document.querySelector('#merger-label') as HTMLDivElement;
-  eventLabel.textContent=eventNow?`MERGER SNAPSHOT WINDOW · INCOMING ID ${eventNow.incomingId} → SURVIVOR ID ${eventNow.survivorId} · ${eventNow.label.toUpperCase()}`:'';
-  eventLabel.classList.toggle('active',Boolean(eventNow));
+  const eventNow=mode==='raw'?mergerEvents.find(e=>displayFrame===e.postIndex&&timeMyr>=(e.eventTimeMyr??e.timeEndMyr)):mergerEvents.find(e=>lower===e.preIndex&&upper===e.postIndex&&timeMyr>=(e.eventTimeMyr??e.timeEndMyr));
   const futureEvent=mergerEvents.find(e=>(e.eventTimeMyr!==undefined?e.eventTimeMyr*1e6:meta.timeMyr[e.postIndex]*1e6)>time);
   const nextEvent=document.querySelector('#next-event')!;
   const participantLabel=futureEvent?.participantIds?`IDs ${futureEvent.participantIds.join(' + ')}`:`ID ${futureEvent?.incomingId}`;
   nextEvent.innerHTML=futureEvent?`<span>NEXT ${futureEvent.source==='BSE Coalescence'?'BSE COALESCENCE':'MERGER CANDIDATE'} · ${participantLabel}</span><b>~${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round(futureEvent.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(futureEvent.timeEndMyr*1e6).toLocaleString('en-US')} yr snapshot bracket</b>`:'<span>MERGER EVENTS</span><b>No later merger event in the supplied record</b>';
   const forecast=document.querySelector('#event-forecast')!;
-  forecast.innerHTML=futureEvent?`<span>NEXT MERGER · ${futureEvent.source==='BSE Coalescence'?'BSE EVENT':'CANDIDATE'}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
+  forecast.classList.toggle('active',Boolean(eventNow));
+  forecast.innerHTML=eventNow?`<span>MERGER EVENT · ${eventNow.source==='BSE Coalescence'?'BSE COALESCENCE':'CANDIDATE'}</span><b>ID ${eventNow.incomingId} → ID ${eventNow.survivorId}</b><small>${Math.round((eventNow.eventTimeMyr??eventNow.timeEndMyr)*1e6).toLocaleString('en-US')} yr · snapshot bracket ${Math.round(eventNow.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(eventNow.timeEndMyr*1e6).toLocaleString('en-US')} yr</small>`:futureEvent?`<span>NEXT MERGER · ${futureEvent.source==='BSE Coalescence'?'BSE EVENT':'CANDIDATE'}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
   updatePlayButton();
 }
 function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }

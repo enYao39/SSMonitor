@@ -29,7 +29,7 @@ Interpolation provides visual continuity only; it does not recover close orbital
 
 The scene requests Three.js `WebGPURenderer`; this selects a WebGPU backend where available and falls back to WebGL 2 when required by the browser/device. The app reports the active backend in the scene header.
 
-The central-mass history and timeline share a physical-time x-axis; exact BSE event times drive the timeline ticks, event jump menu and persistent 3D forecast. Incoming low-mass merger participants are amber, while the incoming star for the next event is red; the 3D view includes a colour legend. Selected particles get a bright cyan ring. Clicking the selected particle again clears the selection. Click a particle to monitor its position, velocity, mass, BSE type, radius and luminosity. BSE event logs provide event time and participant IDs, while snapshots provide the changing particle properties; event times are bracketed by the saved snapshots.
+The central-mass history and timeline share a physical-time x-axis; exact BSE event times drive the timeline ticks, event jump menu and persistent 3D merger card. The card forecasts the next event, then changes to a red event alert at coalescence time. Incoming low-mass merger participants are amber, while the incoming star for the next event is red; the 3D view includes a colour legend. Selected particles get a bright cyan ring. Clicking the selected particle again clears the selection. Click a particle to monitor its position, velocity, mass, BSE type, radius and luminosity. BSE event logs provide event time and participant IDs, while snapshots provide the changing particle properties; event times are bracketed by the saved snapshots.
 
 ## Production build and Pages
 
