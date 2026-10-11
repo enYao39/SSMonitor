@@ -46,7 +46,7 @@ app.innerHTML = `
         <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline" aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
         <div class="event-jump-row"><label for="event-select">JUMP TO MERGER</label><select id="event-select" aria-label="Jump to merger event"><option value="">Select an event…</option></select></div>
         <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
-        <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint" id="play-hint">Adjustable physical time rate · ←/→ one snapshot · Shift+←/→ ten</div>
+        <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint" id="play-hint">←/→ anywhere: one snapshot · Shift+←/→: ten</div>
       </div>
       <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉</span></div><canvas id="mass-chart" aria-label="Central star mass over simulation time"></canvas><div class="chart-labels"><span>0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div></div>
       <div class="monitor panel"><div class="section-kicker">TARGET MONITOR <span id="target-status">CLICK A STAR</span></div><div id="target-details" class="target-details"><span>Select a particle in the 3D view to follow its motion and BSE properties.</span></div></div>
@@ -273,6 +273,17 @@ timeline.addEventListener('keydown',event=>{
   const direction=event.key==='ArrowRight'?1:-1;
   putFrame(framePosition+direction*(event.shiftKey?10:1));
 });
+document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||(event.key!=='ArrowLeft'&&event.key!=='ArrowRight'))return;
+  const target=event.target;
+  if(target instanceof Element){
+    if(target.closest('#timeline,input,select,textarea,button,a,[contenteditable="true"]'))return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const direction=event.key==='ArrowRight'?1:-1;
+  putFrame(framePosition+direction*(event.shiftKey?10:1));
+},true);
 document.querySelector('#interpolation')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#colour-mode')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#diffraction')!.addEventListener('change', () => { diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked; });
