@@ -27,8 +27,9 @@ app.innerHTML = `
       </div>
       <div id="scene"></div>
       <div class="scene-caption"><span class="caption-vms"></span> CENTRAL VMS <i></i><span id="color-mode-label">BLACKBODY COLOUR</span><span class="caption-note">DISPLAY SIZES ARE EXAGGERATED</span></div>
-      <div class="merger-label" id="merger-label"></div>
       <div class="event-forecast" id="event-forecast">NEXT MERGER · LOADING EVENT DATA</div>
+      <div class="merger-label" id="merger-label"></div>
+      <div class="scene-legend"><span><i class="legend-participants"></i>MERGER PARTICIPANTS</span><span><i class="legend-next"></i>NEXT EVENT INCOMING STAR</span></div>
       <div class="axis-note">X · Y · Z <span>/</span> pc</div>
       <div class="loading" id="loading"><div class="loader"></div><b>Loading the simulation record</b><span>793 saved snapshots · ID-aligned particle cache</span></div>
     </div>
@@ -41,7 +42,7 @@ app.innerHTML = `
       <div class="controls panel"><div class="control-head"><div class="section-kicker">TIME CONTROL</div><span class="frame-count" id="frame-count">793 SNAPSHOTS</span></div>
         <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button><button id="reset-time" class="step-button reset-time" aria-label="Return to start">↶</button></div>
         <div class="rate-row"><label for="speed">SIMULATION TIME / REAL SECOND</label><select id="speed" aria-label="Simulation years per real second"><option value="10">10 yr/s</option><option value="25">25 yr/s</option><option value="50">50 yr/s</option><option value="100" selected>100 yr/s</option><option value="250">250 yr/s</option><option value="500">500 yr/s</option><option value="1000">1,000 yr/s</option></select></div>
-        <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.01" aria-label="Simulation timeline"><div class="range-labels"><span>0 yr</span><span id="end-time">78,930 yr</span></div></div>
+        <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
         <div class="event-jump-row"><label for="event-select">JUMP TO MERGER</label><select id="event-select" aria-label="Jump to merger event"><option value="">Select an event…</option></select></div>
         <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
         <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint" id="play-hint">Adjustable physical time rate · all saved snapshots are used</div>
@@ -104,6 +105,7 @@ const blackbodyColor = (kelvin: number): [number, number, number] => {
   else { r = 329.698727446 * ((t - 60) ** -0.1332047592); g = 288.1221695283 * ((t - 60) ** -0.0755148492); b = 255; }
   return [r, g, b].map(c => Math.pow(THREE.MathUtils.clamp(c / 255, 0, 1), 2.2)) as [number, number, number];
 };
+const typePalette:[[number,number,number],...[number,number,number][]]=[[.52,.65,.76],[.45,.73,.88],[.56,.82,.72],[.92,.78,.42],[.95,.54,.36],[.76,.55,.88],[.92,.4,.48],[.7,.75,.82],[.52,.58,.68],[.8,.7,.9],[.66,.78,.94],[.86,.76,.58],[.92,.57,.45],[.7,.82,.75],[.85,.72,.7],[.9,.82,.6]];
 let framePosition = 0, playing = false, last = performance.now();
 let selectedIndex = -1, lastUiUpdate = 0, lastChartSize = '';
 let cameraQuaternion = new THREE.Quaternion();
@@ -123,6 +125,8 @@ function putFrame(position: number, updateUi = true) {
   const centerIndex = idToIndex.get(meta.centerIds[displayFrame]);
   const colorMode = (document.querySelector<HTMLSelectElement>('#colour-mode')!).value;
   const t0 = meta.timeMyr[lower], t1 = meta.timeMyr[upper], dt = t1 - t0;
+  const timeMyr = mode === 'raw' ? meta.timeMyr[Math.round(framePosition)] : THREE.MathUtils.lerp(t0, t1, alpha);
+  const nextEventForView=mergerEvents.find(e=>(e.eventTimeMyr??e.timeEndMyr)>timeMyr);
   const u = continuous ? alpha : 0, u2 = u * u, u3 = u2 * u;
   const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u;
   const h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
@@ -132,7 +136,7 @@ function putFrame(position: number, updateUi = true) {
     const chosen = continuous ? (alpha < 0.5 ? o0 : o1) : displayFrame * meta.particleCount * FIELDS + i * FIELDS;
     const present0 = data[o0 + 10] > 0.5, present1 = data[o1 + 10] > 0.5;
     const interpolateParticle = continuous && present0 && present1;
-    const present = interpolateParticle || data[chosen + 10] > 0.5;
+    let present = interpolateParticle || data[chosen + 10] > 0.5;
     let x = present ? data[chosen] : 0, y = present ? data[chosen + 1] : 0, z = present ? data[chosen + 2] : 0;
     if (interpolateParticle) {
       if (mode === 'hermite') {
@@ -147,7 +151,11 @@ function putFrame(position: number, updateUi = true) {
     const mass = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 6], data[o1 + 6], alpha) : data[chosen + 6];
     const lum = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 9], data[o1 + 9], alpha) : data[chosen + 9];
     const radius = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 8], data[o1 + 8], alpha) : data[chosen + 8];
-    const visualRadius = isCenter ? 0 : present ? 0.00011 + Math.min(0.00009, Math.log10(Math.max(1, mass)) * 0.000035) : 0;
+    const eventForParticle=mergerEvents.find(e=>e.incomingId===ids[i]&&e.preIndex===lower&&e.postIndex===upper);
+    const fadingIncoming=Boolean(eventForParticle&&present0&&!present1&&timeMyr<t1);
+    let eventFade=1;
+    if(fadingIncoming&&eventForParticle){present=true;eventFade=1-THREE.MathUtils.clamp((timeMyr-t0)/Math.max(t1-t0,1e-12),0,1);const elapsed=Math.max(0,timeMyr-t0);x=data[o0]+data[o0+3]*elapsed;y=data[o0+1]+data[o0+4]*elapsed;z=data[o0+2]+data[o0+5]*elapsed;}
+    const visualRadius = isCenter ? 0 : present ? (0.00011 + Math.min(0.00009, Math.log10(Math.max(1, mass)) * 0.000035))*eventFade : 0;
     setMatrix(stars, i, x, y, z, visualRadius);
     setMatrix(halos, i, x, y, z, visualRadius * 2.35);
     const tempValid = Number.isFinite(lum) && Number.isFinite(radius) && lum > 0 && radius > 0;
@@ -156,14 +164,14 @@ function putFrame(position: number, updateUi = true) {
     const vy = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 4], data[o1 + 4], alpha) : data[chosen + 4];
     const vz = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 5], data[o1 + 5], alpha) : data[chosen + 5];
     const stellarType = data[chosen + 7];
-    const typePalette:[[number,number,number],...[number,number,number][]]=[[.52,.65,.76],[.45,.73,.88],[.56,.82,.72],[.92,.78,.42],[.95,.54,.36],[.76,.55,.88],[.92,.4,.48],[.7,.75,.82],[.52,.58,.68],[.8,.7,.9],[.66,.78,.94],[.86,.76,.58],[.92,.57,.45],[.7,.82,.75],[.85,.72,.7],[.9,.82,.6]];
     const typeColor = typePalette[THREE.MathUtils.clamp(Math.round(stellarType)||0,0,typePalette.length-1)];
     const colour = isCenter ? [0, 0, 0] : colorMode === 'uniform' ? [0.78, 0.84, 0.91] : colorMode === 'type' ? typeColor : colorMode === 'velocity' ? speedColor(Math.hypot(vx, vy, vz) * 0.977792) : tempValid && Number.isFinite(teff) && teff > 0 ? blackbodyColor(teff) : [0.34, 0.39, 0.47];
     const state=particleStates[i]; Object.assign(state,{x,y,z,vx,vy,vz,mass,type:stellarType,radius,lum,present});
-    const markEvent=mergerEvents.some(e=>ids[i]===e.incomingId && displayFrame>=Math.max(0,e.preIndex-4) && displayFrame<=e.preIndex);
+    const mergerParticipant=mergerEvents.some(e=>e.incomingId===ids[i]&&timeMyr<=meta.timeMyr[e.postIndex]);
+    const nextIncoming=nextEventForView?.incomingId===ids[i];
     tempColor.setRGB(colour[0], colour[1], colour[2]); stars.setColorAt(i, tempColor);
     tempColor.setRGB(colour[0], colour[1], colour[2]); halos.setColorAt(i, tempColor);
-    if(markEvent){tempColor.setRGB(1,.08,.05);stars.setColorAt(i,tempColor);halos.setColorAt(i,tempColor);}
+    if(mergerParticipant||nextIncoming){tempColor.setRGB(...(nextIncoming?[1,.055,.035]:[1,.58,.16]) as [number,number,number]);stars.setColorAt(i,tempColor);halos.setColorAt(i,tempColor);}
     const logLum = tempValid ? THREE.MathUtils.clamp(Math.log10(lum + 1) / 5, 0.12, 1) : 0;
     const diffractionSize = present && !isCenter ? visualRadius * (14 + logLum * 10) : 0;
     renderedPositions[i * 3] = x; renderedPositions[i * 3 + 1] = y; renderedPositions[i * 3 + 2] = z; renderedDiffractionSizes[i] = diffractionSize;
@@ -174,11 +182,10 @@ function putFrame(position: number, updateUi = true) {
   diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked;
   centerCore.position.set(0, 0, 0); centerHalo.position.set(0, 0, 0);
   document.querySelector('#color-mode-label')!.textContent = colorMode === 'temperature' ? 'BLACKBODY COLOUR · BSE L / R' : colorMode === 'velocity' ? 'RELATIVE SPEED · km/s' : colorMode === 'type' ? 'BSE STELLAR TYPE CODE' : 'UNIFORM STAR COLOUR';
-  const timeMyr = continuous ? THREE.MathUtils.lerp(t0, t1, alpha) : meta.timeMyr[displayFrame];
   const time = timeMyr * 1e6;
   const snapshotLabel = continuous && alpha > 0.005 ? `BETWEEN ${lower}–${upper} · ${mode.toUpperCase()}` : `SNAPSHOT ${String(displayFrame).padStart(3, '0')} / ${meta.frameCount - 1}`;
   updateSelectionIndicator();
-  updateEventTrails(displayFrame);
+  updateEventTrails(displayFrame,nextEventForView?.incomingId);
   if (!updateUi) return;
   document.querySelector('#time-value')!.textContent = `${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} yr`;
   document.querySelector('#snapshot-value')!.textContent = snapshotLabel;
@@ -189,20 +196,20 @@ function putFrame(position: number, updateUi = true) {
   document.querySelector('#particle-count')!.textContent = particleCount.toLocaleString('en-US');
   document.querySelector('#vms-mass')!.textContent = Math.round(vmsMass).toLocaleString('en-US');
   document.querySelector('#center-id')!.textContent = `ID ${centerId}`;
-  (document.querySelector('#timeline') as HTMLInputElement).value = String(framePosition);
+  (document.querySelector('#timeline') as HTMLInputElement).value = String(timeMyr);
   document.querySelector('#frame-summary')!.textContent = `${snapshotLabel} · ${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} YR`;
   document.querySelector('#mass-chart-current')!.textContent=`${time.toLocaleString('en-US',{maximumFractionDigits:0})} yr`;
   updateTargetMonitor(); drawMassChart(framePosition);
-  const eventNow=mergerEvents.find(e=>displayFrame>=Math.max(0,e.preIndex-4)&&displayFrame<=e.preIndex);
+  const eventNow=mergerEvents.find(e=>displayFrame>=e.preIndex&&displayFrame<=e.postIndex);
   const eventLabel=document.querySelector('#merger-label') as HTMLDivElement;
-  eventLabel.textContent=eventNow?`MERGER CANDIDATE · ID ${eventNow.incomingId} · ${eventNow.label.toUpperCase()}`:'';
+  eventLabel.textContent=eventNow?`MERGER SNAPSHOT WINDOW · INCOMING ID ${eventNow.incomingId} → SURVIVOR ID ${eventNow.survivorId} · ${eventNow.label.toUpperCase()}`:'';
   eventLabel.classList.toggle('active',Boolean(eventNow));
   const futureEvent=mergerEvents.find(e=>(e.eventTimeMyr!==undefined?e.eventTimeMyr*1e6:meta.timeMyr[e.postIndex]*1e6)>time);
   const nextEvent=document.querySelector('#next-event')!;
   const participantLabel=futureEvent?.participantIds?`IDs ${futureEvent.participantIds.join(' + ')}`:`ID ${futureEvent?.incomingId}`;
   nextEvent.innerHTML=futureEvent?`<span>NEXT ${futureEvent.source==='BSE Coalescence'?'BSE COALESCENCE':'MERGER CANDIDATE'} · ${participantLabel}</span><b>~${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round(futureEvent.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(futureEvent.timeEndMyr*1e6).toLocaleString('en-US')} yr snapshot bracket</b>`:'<span>MERGER EVENTS</span><b>No later merger event in the supplied record</b>';
   const forecast=document.querySelector('#event-forecast')!;
-  forecast.textContent=futureEvent?`NEXT MERGER · IDs ${futureEvent.participantIds?.join(' + ')??futureEvent.incomingId} · T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr`:'NO FURTHER MERGER EVENTS';
+  forecast.innerHTML=futureEvent?`<span>NEXT MERGER · ${futureEvent.source==='BSE Coalescence'?'BSE EVENT':'CANDIDATE'}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
   updatePlayButton();
 }
 function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
@@ -238,7 +245,8 @@ function updatePlayButton() {
   if (labelElement.textContent !== label) labelElement.textContent = label;
 }
 function setPlaying(value: boolean) { playing = value; last = performance.now(); updatePlayButton(); }
-(document.querySelector('#timeline') as HTMLInputElement).max = String(meta.frameCount - 1);
+(document.querySelector('#timeline') as HTMLInputElement).max = String(meta.timeMyr.at(-1)!);
+document.querySelector('#start-time')!.textContent = `${Math.round(meta.timeMyr[0] * 1e6).toLocaleString('en-US')} yr`;
 document.querySelector('#end-time')!.textContent = `${Math.round(meta.timeMyr.at(-1)! * 1e6).toLocaleString('en-US')} yr`;
 putFrame(0);
 document.querySelector('#play')!.addEventListener('click', () => {
@@ -249,7 +257,7 @@ document.querySelector('#play')!.addEventListener('click', () => {
 document.querySelector('#prev')!.addEventListener('click', () => putFrame(Math.max(0, Math.round(framePosition) - 1)));
 document.querySelector('#next')!.addEventListener('click', () => putFrame(Math.min(meta.frameCount - 1, Math.round(framePosition) + 1)));
 document.querySelector('#reset-time')!.addEventListener('click', () => { putFrame(0); setPlaying(false); });
-document.querySelector('#timeline')!.addEventListener('input', event => putFrame(Number((event.target as HTMLInputElement).value)));
+document.querySelector('#timeline')!.addEventListener('input', event => putFrame(timeToFramePosition(Number((event.target as HTMLInputElement).value))));
 document.querySelector('#interpolation')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#colour-mode')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#diffraction')!.addEventListener('change', () => { diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked; });
@@ -263,12 +271,12 @@ document.querySelector('#reset-camera')!.addEventListener('click', () => { camer
 document.querySelector('#loading')!.classList.add('hidden');
 function timeToFramePosition(timeMyr:number){const times=meta.timeMyr;let lo=0,hi=times.length-1;while(lo+1<hi){const mid=(lo+hi)>>1;if(times[mid]<=timeMyr)lo=mid;else hi=mid;}const span=times[hi]-times[lo];return lo+(span>0?THREE.MathUtils.clamp((timeMyr-times[lo])/span,0,1):0);}
 const markerHost=document.querySelector('#timeline-event-marks')!,eventSelect=document.querySelector<HTMLSelectElement>('#event-select')!;
-mergerEvents.forEach((e,i)=>{const exactTime=e.eventTimeMyr??e.timeEndMyr;const eventPosition=timeToFramePosition(exactTime);const mark=document.createElement('i');mark.title=`${e.source??'Merger candidate'} · ${exactTime*1e6} yr · IDs ${e.participantIds?.join(' + ')??e.incomingId}`;mark.style.left=`${100*eventPosition/(meta.frameCount-1)}%`;markerHost.append(mark);const option=document.createElement('option');option.value=String(i);option.textContent=`${(exactTime*1e6).toLocaleString('en-US',{maximumFractionDigits:1})} yr · IDs ${e.participantIds?.join(' + ')??e.incomingId}`;eventSelect.append(option);});
+mergerEvents.forEach((e,i)=>{const exactTime=e.eventTimeMyr??e.timeEndMyr;const mark=document.createElement('i');mark.title=`${e.source??'Merger candidate'} · ${exactTime*1e6} yr · IDs ${e.participantIds?.join(' + ')??e.incomingId}`;mark.style.left=`${100*(exactTime-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0])}%`;markerHost.append(mark);const option=document.createElement('option');option.value=String(i);option.textContent=`${(exactTime*1e6).toLocaleString('en-US',{maximumFractionDigits:1})} yr · IDs ${e.participantIds?.join(' + ')??e.incomingId}`;eventSelect.append(option);});
 eventSelect.addEventListener('change',()=>{const index=Number(eventSelect.value);if(eventSelect.value&&mergerEvents[index])putFrame(timeToFramePosition(mergerEvents[index].eventTimeMyr??mergerEvents[index].timeEndMyr));});
 const bseCodes=meta.stellarTypeCodes??[];
 document.querySelector('#bse-note')!.textContent=`Snapshot BSE type code${bseCodes.length===1?'':'s'}: ${bseCodes.join(', ')||'not present'}${bseCodes.length===1&&bseCodes[0]===1?' (main sequence throughout this archive). ':'. '}Effective temperature uses BSE luminosity and radius.`;
 
-function updateEventTrails(displayFrame:number){eventTrails.forEach((line,ei)=>{const e=mergerEvents[ei];line.visible=displayFrame>=Math.max(0,e.preIndex-4)&&displayFrame<=e.preIndex;});}
+function updateEventTrails(displayFrame:number,nextIncomingId?:number){eventTrails.forEach((line,ei)=>{const e=mergerEvents[ei];line.visible=displayFrame>=Math.max(0,e.preIndex-4)&&displayFrame<=e.preIndex;(line.material as THREE.LineBasicMaterial).color.set(e.incomingId===nextIncomingId?'#ff3025':'#ff9429');});}
 function updateTargetMonitor(){
   const status=document.querySelector('#target-status')!,box=document.querySelector('#target-details')!;
   if(selectedIndex<0){status.textContent='CLICK A STAR';box.innerHTML='<span>Select a particle in the 3D view to follow its motion and BSE properties.</span>';return;}
@@ -290,8 +298,8 @@ function drawMassChart(position:number){
   if(key!==lastChartSize){canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);lastChartSize=key;}
   const ctx=canvas.getContext('2d')!;ctx.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,pad=5;ctx.clearRect(0,0,w,h);
   const vals=meta.centerMassMsun,min=Math.min(...vals),max=Math.max(...vals),span=Math.max(max-min,1);ctx.strokeStyle='#d8bd7e';ctx.lineWidth=1.5;ctx.beginPath();
-  vals.forEach((v,i)=>{const x=pad+(w-2*pad)*i/(vals.length-1),y=h-pad-(h-2*pad)*(v-min)/span;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
-  const x=pad+(w-2*pad)*position/(meta.frameCount-1);ctx.strokeStyle='#ff7063';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();
+  vals.forEach((v,i)=>{const x=pad+(w-2*pad)*(meta.timeMyr[i]-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0]),y=h-pad-(h-2*pad)*(v-min)/span;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+  const lo=Math.floor(position),hi=Math.ceil(position),time=THREE.MathUtils.lerp(meta.timeMyr[lo],meta.timeMyr[hi],position-lo),x=pad+(w-2*pad)*(time-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0]);ctx.strokeStyle='#ff7063';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();
   document.querySelector('#mass-chart-end')!.textContent=`${Math.round(max).toLocaleString()} M☉`;
 }
 const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
@@ -299,4 +307,4 @@ const projected=new THREE.Vector3();
 renderer.domElement.addEventListener('click',(event:MouseEvent)=>{const rect=renderer.domElement.getBoundingClientRect();pointer.set(((event.clientX-rect.left)/rect.width)*2-1,-((event.clientY-rect.top)/rect.height)*2+1);raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObject(stars);let best=hits[0]?.instanceId??-1,bestDistance=18;
   if(best<0){for(let i=0;i<meta.particleCount;i++){if(!particleStates[i].present)continue;projected.set(renderedPositions[i*3],renderedPositions[i*3+1],renderedPositions[i*3+2]).project(camera);if(projected.z < -1 || projected.z > 1)continue;const px=rect.left+(projected.x+1)*rect.width/2,py=rect.top+(1-projected.y)*rect.height/2,d=Math.hypot(px-event.clientX,py-event.clientY);if(d<bestDistance){best=i;bestDistance=d;}}}
   if(best>=0){selectedIndex=best===selectedIndex?-1:best;updateSelectionIndicator();updateTargetMonitor();}});
-document.querySelector('#mass-chart')!.addEventListener('click',event=>{const mouse=event as MouseEvent,rect=(event.currentTarget as HTMLCanvasElement).getBoundingClientRect();putFrame(THREE.MathUtils.clamp((mouse.clientX-rect.left)/rect.width,0,1)*(meta.frameCount-1));});
+document.querySelector('#mass-chart')!.addEventListener('click',event=>{const mouse=event as MouseEvent,rect=(event.currentTarget as HTMLCanvasElement).getBoundingClientRect(),fraction=THREE.MathUtils.clamp((mouse.clientX-rect.left)/rect.width,0,1),time=THREE.MathUtils.lerp(meta.timeMyr[0],meta.timeMyr.at(-1)!,fraction);putFrame(timeToFramePosition(time));});
