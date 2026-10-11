@@ -8,6 +8,8 @@ type Metadata = {
 };
 type MergerEvent = { preIndex:number; postIndex:number; timeStartMyr:number; timeEndMyr:number; eventTimeMyr?:number; incomingId:number; survivorId:number; participantIds?:number[]; survivorMassGainMsun:number|null; centralMergerCandidate:boolean; source?:string; label:string };
 const FIELDS = 11;
+const MASS_CHART_LAYOUT = { left: 44, right: 6, top: 6, bottom: 4 };
+const TRAIL_SAMPLES_PER_SNAPSHOT = 8;
 // Begin a visible warning four saved outputs before the BSE merger time.
 const MERGER_WARNING_SNAPSHOTS = 4;
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -48,7 +50,7 @@ app.innerHTML = `
         <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
         <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint" id="play-hint">←/→ anywhere: one snapshot · Shift+←/→: ten</div>
       </div>
-      <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉</span></div><canvas id="mass-chart" aria-label="Central star mass over simulation time"></canvas><div class="chart-labels"><span>0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div></div>
+      <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉ · TIME →</span></div><canvas id="mass-chart" aria-label="Central star mass over simulation time; mass axis in solar masses and time axis in years"></canvas><div class="chart-labels"><span id="mass-chart-start">0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div></div>
       <div class="monitor panel"><div class="section-kicker">TARGET MONITOR <span id="target-status">CLICK A STAR</span></div><div id="target-details" class="target-details"><span>Select a particle in the 3D view to follow its motion and BSE properties.</span></div></div>
       <div class="appearance panel"><div class="section-kicker">LIGHT & COLOUR</div><div class="appearance-row"><label for="colour-mode">STAR COLOUR</label><select id="colour-mode"><option value="temperature" selected>Effective temperature</option><option value="velocity">Relative velocity</option><option value="type">BSE type code</option><option value="uniform">Soft white</option></select></div><label class="toggle-row" for="diffraction"><span><b>Diffraction spikes</b><small>Subtle 4-point telescope aperture effect</small></span><input id="diffraction" type="checkbox" checked><span class="switch"></span></label><div class="appearance-note" id="bse-note">BSE type is shown as a categorical code; temperature uses BSE luminosity and radius.</div></div>
       <div class="interaction panel"><div class="section-kicker">NAVIGATE THE SYSTEM</div><div class="interaction-keys"><span><b>DRAG</b> rotate</span><span><b>SCROLL</b> zoom</span><span><b>RIGHT-DRAG</b> pan</span><span><b>CLICK</b> inspect star</span></div></div>
@@ -113,9 +115,9 @@ let cameraQuaternion = new THREE.Quaternion();
 const lastDiffractionOrientation = new THREE.Quaternion(0, 0, 0, 0);
 const selectionRing = new THREE.Mesh(new THREE.TorusGeometry(.00066,.000045,8,40),new THREE.MeshBasicMaterial({color:'#8ff5e8',toneMapped:false,depthTest:false})); selectionRing.visible=false; selectionRing.renderOrder=7; scene.add(selectionRing);
 const selectionGlow = new THREE.Mesh(new THREE.SphereGeometry(.00022,18,12),new THREE.MeshBasicMaterial({color:'#65f5df',transparent:true,opacity:.25,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,depthTest:false}));selectionGlow.visible=false;selectionGlow.renderOrder=6;scene.add(selectionGlow);
-const trailGeometry=new THREE.BufferGeometry(),trailPositions=new Float32Array((meta.frameCount+2)*3),trailAttribute=new THREE.BufferAttribute(trailPositions,3);trailAttribute.setUsage(THREE.DynamicDrawUsage);trailGeometry.setAttribute('position',trailAttribute);trailGeometry.setDrawRange(0,0);
+const trailGeometry=new THREE.BufferGeometry(),trailPositions=new Float32Array((meta.frameCount*TRAIL_SAMPLES_PER_SNAPSHOT+8)*3),trailAttribute=new THREE.BufferAttribute(trailPositions,3);trailAttribute.setUsage(THREE.DynamicDrawUsage);trailGeometry.setAttribute('position',trailAttribute);trailGeometry.setDrawRange(0,0);
 const eventTrail=new THREE.Line(trailGeometry,new THREE.LineBasicMaterial({color:'#ff3025',transparent:true,opacity:.88}));eventTrail.visible=false;eventTrail.renderOrder=5;scene.add(eventTrail);
-let activeTrailEvent=-1,trailLastSnapshot=-1,trailFixedCount=0,trailLastPosition=-1;
+let activeTrailEvent=-1,trailPointCount=0,trailLastPosition=-1,trailNextSample=0;
 function setMatrix(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, scale: number, quaternion = dummy.quaternion) {
   dummy.position.set(x, y, z); dummy.quaternion.copy(quaternion); dummy.scale.setScalar(scale); dummy.updateMatrix(); mesh.setMatrixAt(index, dummy.matrix);
 }
@@ -256,6 +258,8 @@ function setPlaying(value: boolean) { playing = value; last = performance.now();
 (document.querySelector('#timeline') as HTMLInputElement).max = String(meta.timeMyr.at(-1)!);
 document.querySelector('#start-time')!.textContent = `${Math.round(meta.timeMyr[0] * 1e6).toLocaleString('en-US')} yr`;
 document.querySelector('#end-time')!.textContent = `${Math.round(meta.timeMyr.at(-1)! * 1e6).toLocaleString('en-US')} yr`;
+document.querySelector('#mass-chart-start')!.textContent = `${Math.round(meta.timeMyr[0] * 1e6).toLocaleString('en-US')} yr`;
+document.querySelector('#mass-chart-end')!.textContent = `${Math.round(meta.timeMyr.at(-1)! * 1e6).toLocaleString('en-US')} yr`;
 putFrame(0);
 document.querySelector('#play')!.addEventListener('click', () => {
   if (playing) { setPlaying(false); return; }
@@ -302,19 +306,31 @@ eventSelect.addEventListener('change',()=>{const index=Number(eventSelect.value)
 const bseCodes=meta.stellarTypeCodes??[];
 document.querySelector('#bse-note')!.textContent=`Snapshot BSE type code${bseCodes.length===1?'':'s'}: ${bseCodes.join(', ')||'not present'}${bseCodes.length===1&&bseCodes[0]===1?' (main sequence throughout this archive). ':'. '}Effective temperature uses BSE luminosity and radius.`;
 
+function getEventTrailPoint(slot:number,position:number,event:MergerEvent,mode:string){
+  const p=THREE.MathUtils.clamp(position,0,meta.frameCount-1),lo=Math.floor(p),hi=Math.min(lo+1,meta.frameCount-1),alpha=p-lo,o0=(lo*meta.particleCount+slot)*FIELDS,o1=(hi*meta.particleCount+slot)*FIELDS,present0=data[o0+10]>.5,present1=data[o1+10]>.5;
+  if(mode==='raw'){const o=(Math.round(p)*meta.particleCount+slot)*FIELDS;return data[o+10]>.5?[data[o],data[o+1],data[o+2]] as [number,number,number]:null;}
+  if(lo===event.preIndex&&hi===event.postIndex&&present0&&!present1){const elapsed=THREE.MathUtils.clamp(meta.timeMyr[lo]+(meta.timeMyr[hi]-meta.timeMyr[lo])*alpha-meta.timeMyr[lo],0,meta.timeMyr[hi]-meta.timeMyr[lo]);return [data[o0]+data[o0+3]*elapsed,data[o0+1]+data[o0+4]*elapsed,data[o0+2]+data[o0+5]*elapsed] as [number,number,number];}
+  if(present0&&present1){
+    if(mode==='hermite'){
+      const dt=meta.timeMyr[hi]-meta.timeMyr[lo],u2=alpha*alpha,u3=u2*alpha,h00=2*u3-3*u2+1,h10=u3-2*u2+alpha,h01=-2*u3+3*u2,h11=u3-u2;
+      return [0,1,2].map(axis=>h00*data[o0+axis]+h10*dt*data[o0+3+axis]+h01*data[o1+axis]+h11*dt*data[o1+3+axis]) as [number,number,number];
+    }
+    return [0,1,2].map(axis=>THREE.MathUtils.lerp(data[o0+axis],data[o1+axis],alpha)) as [number,number,number];
+  }
+  const o=present0?o0:present1?o1:-1;return o<0?null:[data[o],data[o+1],data[o+2]] as [number,number,number];
+}
 function updateEventTrail(position:number,nextEvent?:MergerEvent){
-  const nextIndex=nextEvent?mergerEvents.indexOf(nextEvent):-1;
-  if(nextIndex!==activeTrailEvent||position<trailLastPosition-.5){activeTrailEvent=nextIndex;trailLastSnapshot=Math.floor(position);trailFixedCount=0;trailGeometry.setDrawRange(0,0);eventTrail.visible=false;}
-  trailLastPosition=position;if(!nextEvent)return;
-  const slot=idToIndex.get(nextEvent.incomingId);if(slot===undefined)return;
-  const writePoint=(index:number,x:number,y:number,z:number)=>{const offset=index*3;trailPositions[offset]=x;trailPositions[offset+1]=y;trailPositions[offset+2]=z;};
-  const current=particleStates[slot];
-  if(trailFixedCount===0&&current.present){writePoint(0,current.x,current.y,current.z);trailFixedCount=1;trailAttribute.needsUpdate=true;}
-  const frameLimit=Math.min(Math.floor(position),nextEvent.preIndex);
-  while(trailLastSnapshot<frameLimit){const frame=++trailLastSnapshot,o=(frame*meta.particleCount+slot)*FIELDS;if(data[o+10]>.5){writePoint(trailFixedCount++,data[o],data[o+1],data[o+2]);trailAttribute.needsUpdate=true;}}
-  let drawCount=trailFixedCount;
-  if(current.present&&position>trailLastSnapshot&&position<=nextEvent.preIndex+1){writePoint(drawCount++,current.x,current.y,current.z);trailAttribute.needsUpdate=true;}
-  trailGeometry.setDrawRange(0,drawCount);eventTrail.visible=drawCount>1;
+  const nextIndex=nextEvent?mergerEvents.indexOf(nextEvent):-1,rewind=position<trailLastPosition-1e-6;
+  if(nextIndex!==activeTrailEvent||rewind){activeTrailEvent=nextIndex;trailPointCount=0;trailNextSample=(Math.floor(position*TRAIL_SAMPLES_PER_SNAPSHOT)+1)/TRAIL_SAMPLES_PER_SNAPSHOT;trailGeometry.setDrawRange(0,0);eventTrail.visible=false;}
+  if(!nextEvent){trailLastPosition=position;return;}
+  const slot=idToIndex.get(nextEvent.incomingId);if(slot===undefined){trailLastPosition=position;return;}
+  const mode=(document.querySelector<HTMLSelectElement>('#interpolation')!).value,writePoint=(index:number,point:[number,number,number])=>{const offset=index*3;trailPositions[offset]=point[0];trailPositions[offset+1]=point[1];trailPositions[offset+2]=point[2];};
+  if(trailPointCount===0){const initial=getEventTrailPoint(slot,position,nextEvent,mode);if(initial)writePoint(trailPointCount++,initial);}
+  const sampleStep=1/TRAIL_SAMPLES_PER_SNAPSHOT;
+  while(trailNextSample<=position+1e-8&&trailNextSample<=nextEvent.postIndex){const point=getEventTrailPoint(slot,trailNextSample,nextEvent,mode);if(point)writePoint(trailPointCount++,point);trailNextSample+=sampleStep;}
+  const endpoint=getEventTrailPoint(slot,position,nextEvent,mode);let drawCount=trailPointCount;
+  if(endpoint&&Math.abs(position*TRAIL_SAMPLES_PER_SNAPSHOT-Math.round(position*TRAIL_SAMPLES_PER_SNAPSHOT))>1e-6)writePoint(drawCount++,endpoint);
+  trailAttribute.needsUpdate=true;trailGeometry.setDrawRange(0,drawCount);eventTrail.visible=drawCount>1;trailLastPosition=position;
 }
 function updateTargetMonitor(){
   const status=document.querySelector('#target-status')!,box=document.querySelector('#target-details')!;
@@ -335,15 +351,18 @@ function drawMassChart(position:number){
   const canvas=document.querySelector<HTMLCanvasElement>('#mass-chart')!,rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
   const dpr=Math.min(devicePixelRatio||1,2),key=`${rect.width}x${rect.height}@${dpr}`;
   if(key!==lastChartSize){canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);lastChartSize=key;}
-  const ctx=canvas.getContext('2d')!;ctx.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,pad=5;ctx.clearRect(0,0,w,h);
-  const vals=meta.centerMassMsun,min=Math.min(...vals),max=Math.max(...vals),span=Math.max(max-min,1);ctx.strokeStyle='#d8bd7e';ctx.lineWidth=1.5;ctx.beginPath();
-  vals.forEach((v,i)=>{const x=pad+(w-2*pad)*(meta.timeMyr[i]-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0]),y=h-pad-(h-2*pad)*(v-min)/span;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
-  const lo=Math.floor(position),hi=Math.ceil(position),time=THREE.MathUtils.lerp(meta.timeMyr[lo],meta.timeMyr[hi],position-lo),x=pad+(w-2*pad)*(time-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0]);ctx.strokeStyle='#ff7063';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();
-  document.querySelector('#mass-chart-end')!.textContent=`${Math.round(max).toLocaleString()} M☉`;
+  const ctx=canvas.getContext('2d')!;ctx.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,{left,right,top,bottom}=MASS_CHART_LAYOUT;ctx.clearRect(0,0,w,h);
+  const vals=meta.centerMassMsun,rawMin=Math.min(...vals),rawMax=Math.max(...vals),rawSpan=Math.max(rawMax-rawMin,1),roughStep=rawSpan/2.5,magnitude=10**Math.floor(Math.log10(roughStep)),scaled=roughStep/magnitude,step=(scaled<=1?1:scaled<=2?2:scaled<=5?5:10)*magnitude,min=Math.floor(rawMin/step)*step,max=Math.ceil(rawMax/step)*step||min+step,span=Math.max(max-min,step),plotHeight=h-top-bottom,plotWidth=w-left-right;
+  const yFor=(mass:number)=>top+plotHeight-(mass-min)/span*plotHeight;
+  ctx.font="8px 'DM Mono', monospace";ctx.textAlign='right';ctx.textBaseline='middle';ctx.lineWidth=1;
+  for(let tick=min;tick<=max+step*.01;tick+=step){const y=yFor(tick);ctx.strokeStyle='#34403d';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();ctx.fillStyle='#929d98';ctx.fillText(Math.round(tick).toLocaleString('en-US'),left-5,y);}
+  ctx.strokeStyle='#d8bd7e';ctx.lineWidth=1.5;ctx.beginPath();
+  vals.forEach((v,i)=>{const x=left+plotWidth*(meta.timeMyr[i]-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0]),y=yFor(v);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+  const lo=Math.floor(position),hi=Math.ceil(position),time=THREE.MathUtils.lerp(meta.timeMyr[lo],meta.timeMyr[hi],position-lo),x=left+plotWidth*(time-meta.timeMyr[0])/(meta.timeMyr.at(-1)!-meta.timeMyr[0]);ctx.strokeStyle='#ff7063';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();
 }
 const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
 const projected=new THREE.Vector3();
 renderer.domElement.addEventListener('click',(event:MouseEvent)=>{const rect=renderer.domElement.getBoundingClientRect();pointer.set(((event.clientX-rect.left)/rect.width)*2-1,-((event.clientY-rect.top)/rect.height)*2+1);raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObject(stars);let best=hits[0]?.instanceId??-1,bestDistance=18;
   if(best<0){for(let i=0;i<meta.particleCount;i++){if(!particleStates[i].present)continue;projected.set(renderedPositions[i*3],renderedPositions[i*3+1],renderedPositions[i*3+2]).project(camera);if(projected.z < -1 || projected.z > 1)continue;const px=rect.left+(projected.x+1)*rect.width/2,py=rect.top+(1-projected.y)*rect.height/2,d=Math.hypot(px-event.clientX,py-event.clientY);if(d<bestDistance){best=i;bestDistance=d;}}}
   if(best>=0){selectedIndex=best===selectedIndex?-1:best;updateSelectionIndicator();updateTargetMonitor();}});
-document.querySelector('#mass-chart')!.addEventListener('click',event=>{const mouse=event as MouseEvent,rect=(event.currentTarget as HTMLCanvasElement).getBoundingClientRect(),fraction=THREE.MathUtils.clamp((mouse.clientX-rect.left)/rect.width,0,1),time=THREE.MathUtils.lerp(meta.timeMyr[0],meta.timeMyr.at(-1)!,fraction);putFrame(timeToFramePosition(time));});
+document.querySelector('#mass-chart')!.addEventListener('click',event=>{const mouse=event as MouseEvent,rect=(event.currentTarget as HTMLCanvasElement).getBoundingClientRect(),fraction=THREE.MathUtils.clamp((mouse.clientX-rect.left-MASS_CHART_LAYOUT.left)/(rect.width-MASS_CHART_LAYOUT.left-MASS_CHART_LAYOUT.right),0,1),time=THREE.MathUtils.lerp(meta.timeMyr[0],meta.timeMyr.at(-1)!,fraction);putFrame(timeToFramePosition(time));});
