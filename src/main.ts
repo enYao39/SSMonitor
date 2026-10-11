@@ -43,10 +43,10 @@ app.innerHTML = `
       <div class="controls panel"><div class="control-head"><div class="section-kicker">TIME CONTROL</div><span class="frame-count" id="frame-count">793 SNAPSHOTS</span></div>
         <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button><button id="reset-time" class="step-button reset-time" aria-label="Return to start">↶</button></div>
         <div class="rate-row"><label for="speed">SIMULATION TIME / REAL SECOND</label><select id="speed" aria-label="Simulation years per real second"><option value="10">10 yr/s</option><option value="25">25 yr/s</option><option value="50">50 yr/s</option><option value="100" selected>100 yr/s</option><option value="250">250 yr/s</option><option value="500">500 yr/s</option><option value="1000">1,000 yr/s</option></select></div>
-        <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
+        <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline" aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
         <div class="event-jump-row"><label for="event-select">JUMP TO MERGER</label><select id="event-select" aria-label="Jump to merger event"><option value="">Select an event…</option></select></div>
         <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
-        <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint" id="play-hint">Adjustable physical time rate · all saved snapshots are used</div>
+        <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint" id="play-hint">Adjustable physical time rate · ←/→ one snapshot · Shift+←/→ ten</div>
       </div>
       <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉</span></div><canvas id="mass-chart" aria-label="Central star mass over simulation time"></canvas><div class="chart-labels"><span>0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div></div>
       <div class="monitor panel"><div class="section-kicker">TARGET MONITOR <span id="target-status">CLICK A STAR</span></div><div id="target-details" class="target-details"><span>Select a particle in the 3D view to follow its motion and BSE properties.</span></div></div>
@@ -265,7 +265,14 @@ document.querySelector('#play')!.addEventListener('click', () => {
 document.querySelector('#prev')!.addEventListener('click', () => putFrame(Math.max(0, Math.round(framePosition) - 1)));
 document.querySelector('#next')!.addEventListener('click', () => putFrame(Math.min(meta.frameCount - 1, Math.round(framePosition) + 1)));
 document.querySelector('#reset-time')!.addEventListener('click', () => { putFrame(0); setPlaying(false); });
-document.querySelector('#timeline')!.addEventListener('input', event => putFrame(timeToFramePosition(Number((event.target as HTMLInputElement).value))));
+const timeline=document.querySelector<HTMLInputElement>('#timeline')!;
+timeline.addEventListener('input', event => putFrame(timeToFramePosition(Number((event.target as HTMLInputElement).value))));
+timeline.addEventListener('keydown',event=>{
+  if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;
+  event.preventDefault();
+  const direction=event.key==='ArrowRight'?1:-1;
+  putFrame(framePosition+direction*(event.shiftKey?10:1));
+});
 document.querySelector('#interpolation')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#colour-mode')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#diffraction')!.addEventListener('change', () => { diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked; });
