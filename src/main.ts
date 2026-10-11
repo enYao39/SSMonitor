@@ -112,7 +112,9 @@ let cameraQuaternion = new THREE.Quaternion();
 const lastDiffractionOrientation = new THREE.Quaternion(0, 0, 0, 0);
 const selectionRing = new THREE.Mesh(new THREE.TorusGeometry(.00066,.000045,8,40),new THREE.MeshBasicMaterial({color:'#8ff5e8',toneMapped:false,depthTest:false})); selectionRing.visible=false; selectionRing.renderOrder=7; scene.add(selectionRing);
 const selectionGlow = new THREE.Mesh(new THREE.SphereGeometry(.00022,18,12),new THREE.MeshBasicMaterial({color:'#65f5df',transparent:true,opacity:.25,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,depthTest:false}));selectionGlow.visible=false;selectionGlow.renderOrder=6;scene.add(selectionGlow);
-const eventTrails = mergerEvents.map(e=>{const geometry=new THREE.BufferGeometry(),slot=idToIndex.get(e.incomingId),frameIndices:number[]=[];if(slot!==undefined)for(let f=0;f<=e.preIndex;f++){const o=(f*meta.particleCount+slot)*FIELDS;if(data[o+10]>.5)frameIndices.push(f);}const positions=new Float32Array((frameIndices.length+1)*3);frameIndices.forEach((f,i)=>{const o=(f*meta.particleCount+slot!)*FIELDS;positions.set([data[o],data[o+1],data[o+2]],i*3);});const attribute=new THREE.BufferAttribute(positions,3);attribute.setUsage(THREE.DynamicDrawUsage);geometry.setAttribute('position',attribute);geometry.setDrawRange(0,0);const material=new THREE.LineBasicMaterial({color:'#ff9429',transparent:true,opacity:.3});const line=new THREE.Line(geometry,material);line.userData.frameIndices=frameIndices;line.userData.slot=slot;line.userData.event=e;line.visible=false;line.renderOrder=5;scene.add(line);return line;});
+const trailGeometry=new THREE.BufferGeometry(),trailPositions=new Float32Array((meta.frameCount+2)*3),trailAttribute=new THREE.BufferAttribute(trailPositions,3);trailAttribute.setUsage(THREE.DynamicDrawUsage);trailGeometry.setAttribute('position',trailAttribute);trailGeometry.setDrawRange(0,0);
+const eventTrail=new THREE.Line(trailGeometry,new THREE.LineBasicMaterial({color:'#ff3025',transparent:true,opacity:.88}));eventTrail.visible=false;eventTrail.renderOrder=5;scene.add(eventTrail);
+let activeTrailEvent=-1,trailLastSnapshot=-1,trailFixedCount=0,trailLastPosition=-1;
 function setMatrix(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, scale: number, quaternion = dummy.quaternion) {
   dummy.position.set(x, y, z); dummy.quaternion.copy(quaternion); dummy.scale.setScalar(scale); dummy.updateMatrix(); mesh.setMatrixAt(index, dummy.matrix);
 }
@@ -189,7 +191,7 @@ function putFrame(position: number, updateUi = true) {
   const time = timeMyr * 1e6;
   const snapshotLabel = continuous && alpha > 0.005 ? `BETWEEN ${lower}–${upper} · ${mode.toUpperCase()}` : `SNAPSHOT ${String(displayFrame).padStart(3, '0')} / ${meta.frameCount - 1}`;
   updateSelectionIndicator();
-  updateEventTrails(framePosition,nextEventForView?.incomingId);
+  updateEventTrail(framePosition,nextEventForView);
   if (!updateUi) return;
   document.querySelector('#time-value')!.textContent = `${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} yr`;
   document.querySelector('#snapshot-value')!.textContent = snapshotLabel;
@@ -280,7 +282,20 @@ eventSelect.addEventListener('change',()=>{const index=Number(eventSelect.value)
 const bseCodes=meta.stellarTypeCodes??[];
 document.querySelector('#bse-note')!.textContent=`Snapshot BSE type code${bseCodes.length===1?'':'s'}: ${bseCodes.join(', ')||'not present'}${bseCodes.length===1&&bseCodes[0]===1?' (main sequence throughout this archive). ':'. '}Effective temperature uses BSE luminosity and radius.`;
 
-function updateEventTrails(position:number,nextIncomingId?:number){eventTrails.forEach(line=>{const frames=line.userData.frameIndices as number[],slot=line.userData.slot as number|undefined,e=line.userData.event as MergerEvent,geometry=line.geometry,attribute=geometry.getAttribute('position') as THREE.BufferAttribute;let lo=0,hi=frames.length;while(lo<hi){const mid=(lo+hi)>>1;if(frames[mid]<=position)lo=mid+1;else hi=mid;}let count=lo;if(slot!==undefined&&count>0&&position>frames[count-1]&&particleStates[slot].present){const p=particleStates[slot],offset=count*3;attribute.array[offset]=p.x;attribute.array[offset+1]=p.y;attribute.array[offset+2]=p.z;attribute.needsUpdate=true;count++;}geometry.setDrawRange(0,count);line.visible=count>1;const material=line.material as THREE.LineBasicMaterial;const isNext=e.incomingId===nextIncomingId;material.color.set(isNext?'#ff3025':'#ff9429');material.opacity=isNext?.85:.3;});}
+function updateEventTrail(position:number,nextEvent?:MergerEvent){
+  const nextIndex=nextEvent?mergerEvents.indexOf(nextEvent):-1;
+  if(nextIndex!==activeTrailEvent||position<trailLastPosition-.5){activeTrailEvent=nextIndex;trailLastSnapshot=Math.floor(position);trailFixedCount=0;trailGeometry.setDrawRange(0,0);eventTrail.visible=false;}
+  trailLastPosition=position;if(!nextEvent)return;
+  const slot=idToIndex.get(nextEvent.incomingId);if(slot===undefined)return;
+  const writePoint=(index:number,x:number,y:number,z:number)=>{const offset=index*3;trailPositions[offset]=x;trailPositions[offset+1]=y;trailPositions[offset+2]=z;};
+  const current=particleStates[slot];
+  if(trailFixedCount===0&&current.present){writePoint(0,current.x,current.y,current.z);trailFixedCount=1;trailAttribute.needsUpdate=true;}
+  const frameLimit=Math.min(Math.floor(position),nextEvent.preIndex);
+  while(trailLastSnapshot<frameLimit){const frame=++trailLastSnapshot,o=(frame*meta.particleCount+slot)*FIELDS;if(data[o+10]>.5){writePoint(trailFixedCount++,data[o],data[o+1],data[o+2]);trailAttribute.needsUpdate=true;}}
+  let drawCount=trailFixedCount;
+  if(current.present&&position>trailLastSnapshot&&position<=nextEvent.preIndex+1){writePoint(drawCount++,current.x,current.y,current.z);trailAttribute.needsUpdate=true;}
+  trailGeometry.setDrawRange(0,drawCount);eventTrail.visible=drawCount>1;
+}
 function updateTargetMonitor(){
   const status=document.querySelector('#target-status')!,box=document.querySelector('#target-details')!;
   if(selectedIndex<0){status.textContent='CLICK A STAR';box.innerHTML='<span>Select a particle in the 3D view to follow its motion and BSE properties.</span>';return;}
