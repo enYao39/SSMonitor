@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { WebGLRenderer } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './styles.css';
 
@@ -13,6 +14,7 @@ const TRAIL_SAMPLES_PER_SNAPSHOT = 8;
 const MERGER_SLOWDOWN_FACTOR = 0.15;
 // Begin a visible warning four saved outputs before the BSE merger time.
 const MERGER_WARNING_SNAPSHOTS = 4;
+const mergerSourceLabel=(source?:string)=>source==='BSE Coalescence'?'BSE COALESCENCE':source==='PeTar Dynamic_merge'?'DYNAMIC MERGE':'SNAPSHOT MERGER';
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
 <header class="topbar">
@@ -33,7 +35,7 @@ app.innerHTML = `
       <div id="scene"></div>
       <div class="scene-caption"><span class="caption-vms"></span> CENTRAL VMS <i></i><span id="color-mode-label">BLACKBODY COLOUR</span><span class="caption-note">DISPLAY SIZES ARE EXAGGERATED</span></div>
       <div class="event-forecast" id="event-forecast">NEXT MERGER · LOADING EVENT DATA</div>
-      <div class="merger-inset" id="merger-inset" hidden><div class="merger-inset-label" id="merger-inset-label">MERGER CLOSE-UP</div></div>
+      <div class="merger-inset" id="merger-inset" hidden><div class="merger-inset-view" id="merger-inset-view"></div><div class="merger-inset-label" id="merger-inset-label">MERGER CLOSE-UP</div></div>
       <div class="scene-legend"><span><i class="legend-participants"></i>MERGER PARTICIPANTS</span><span><i class="legend-next"></i>NEXT EVENT INCOMING STAR</span></div>
       <div class="axis-note">X · Y · Z <span>/</span> pc</div>
       <div class="loading" id="loading"><div class="loader"></div><b>Loading the simulation record</b><span>793 saved snapshots · ID-aligned particle cache</span></div>
@@ -44,19 +46,29 @@ app.innerHTML = `
         <div class="stat-grid"><div><span>PARTICLES</span><b id="particle-count">—</b></div><div><span>VMS MASS</span><b id="vms-mass">—</b><small>M☉</small></div></div>
         <div class="stat-footer"><span class="status-pip"></span> MOST MASSIVE PARTICLE <span class="footer-right" id="center-id">—</span></div>
       </div>
+      <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉ · LOG TIME →</span></div><canvas id="mass-chart" aria-label="Central star mass over logarithmic time in years; numbered markers identify mergers in the event menu"></canvas><div class="chart-labels"><span id="mass-chart-start">0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div><div class="chart-key"><i class="chart-vms-key"></i>VMS merger <i class="chart-other-key"></i>other merger · numbers match merger menu</div></div>
       <div class="controls panel"><div class="control-head"><div class="section-kicker">TIME CONTROL</div><span class="frame-count" id="frame-count">793 SNAPSHOTS</span></div>
         <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button><button id="reset-time" class="step-button reset-time" aria-label="Return to start">↶</button></div>
         <div class="rate-row"><label for="speed">SIMULATION TIME / REAL SECOND</label><select id="speed" aria-label="Simulation years per real second"><option value="10">10 yr/s</option><option value="25">25 yr/s</option><option value="50">50 yr/s</option><option value="100" selected>100 yr/s</option><option value="250">250 yr/s</option><option value="500">500 yr/s</option><option value="1000">1,000 yr/s</option></select></div>
         <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline" aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
         <div class="event-jump-row"><label for="event-select">JUMP TO MERGER</label><select id="event-select" aria-label="Jump to merger event"><option value="">Select an event…</option></select></div>
         <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
-        <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div>
-        <label class="toggle-row" for="merger-cinematic"><span><b>Merger close-up</b><small>Separate inset + 0.15× slow motion</small></span><input id="merger-cinematic" type="checkbox" checked><span class="switch"></span></label><div class="play-hint" id="play-hint">←/→ anywhere: one snapshot · Shift+←/→: ten</div>
+        <div class="play-hint" id="play-hint">←/→ anywhere: one snapshot · Shift+←/→: ten</div>
       </div>
-      <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉ · LOG TIME →</span></div><canvas id="mass-chart" aria-label="Central star mass over logarithmic time in years; numbered markers identify mergers in the event menu"></canvas><div class="chart-labels"><span id="mass-chart-start">0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div><div class="chart-key"><i class="chart-vms-key"></i>VMS merger <i class="chart-other-key"></i>other merger · numbers match merger menu</div></div>
       <div class="monitor panel"><div class="section-kicker">TARGET MONITOR <span id="target-status">CLICK A STAR</span></div><div id="target-details" class="target-details"><span>Select a particle in the 3D view to follow its motion and BSE properties.</span></div></div>
-      <div class="appearance panel"><div class="section-kicker">LIGHT & COLOUR</div><div class="appearance-row"><label for="colour-mode">STAR COLOUR</label><select id="colour-mode"><option value="temperature" selected>Effective temperature</option><option value="velocity">Relative velocity</option><option value="type">BSE type code</option><option value="uniform">Soft white</option></select></div><label class="toggle-row" for="diffraction"><span><b>Diffraction spikes</b><small>Subtle 4-point telescope aperture effect</small></span><input id="diffraction" type="checkbox" checked><span class="switch"></span></label><div class="appearance-note" id="bse-note">BSE type is shown as a categorical code; temperature uses BSE luminosity and radius.</div></div>
-      <div class="interaction panel"><div class="section-kicker">NAVIGATE THE SYSTEM</div><div class="interaction-keys"><span><b>DRAG</b> rotate</span><span><b>SCROLL</b> zoom</span><span><b>RIGHT-DRAG</b> pan</span><span><b>CLICK</b> inspect star</span></div></div>
+      <div class="settings panel">
+        <div class="section-kicker settings-heading">DISPLAY SETTINGS <span>VIEW · TRAJECTORY · LIGHT</span></div>
+        <section class="advanced-settings" aria-label="View and trajectory settings">
+          <div class="settings-subheading"><b>VIEW & TRAJECTORY</b><small>Interpolation · trail length · merger close-up</small></div>
+          <section class="control-options" aria-label="View settings">
+            <div class="interp-row setting-tile"><label for="interpolation">INTERPOLATION</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div>
+            <div class="trail-window-row setting-tile"><label for="event-trail-window">TRAIL LENGTH</label><select id="event-trail-window" aria-label="Event trajectory length in snapshots"><option value="25">25 snapshots</option><option value="50" selected>50 snapshots</option><option value="75">75 snapshots</option><option value="100">100 snapshots</option></select></div>
+            <label class="toggle-row" for="merger-cinematic"><span><b>Merger close-up</b><small>Orbital-plane view · stars dimmed</small></span><input id="merger-cinematic" type="checkbox" checked><span class="switch"></span></label>
+          </section>
+        </section>
+        <section class="appearance settings-appearance"><div class="section-kicker">LIGHT & COLOUR</div><div class="appearance-row"><label for="colour-mode">STAR COLOUR</label><select id="colour-mode"><option value="temperature" selected>Effective temperature</option><option value="velocity">Relative velocity</option><option value="type">BSE type code</option><option value="uniform">Soft white</option></select></div><label class="toggle-row" for="diffraction"><span><b>Diffraction spikes</b><small>Subtle 4-point telescope aperture effect</small></span><input id="diffraction" type="checkbox" checked><span class="switch"></span></label><div class="appearance-note" id="bse-note">BSE type is shown as a categorical code; temperature uses BSE luminosity and radius.</div></section>
+        <section class="interaction settings-interaction"><div class="section-kicker">NAVIGATE THE SYSTEM</div><div class="interaction-keys"><span><b>DRAG</b> rotate</span><span><b>SCROLL</b> zoom</span><span><b>RIGHT-DRAG</b> pan</span><span><b>CLICK</b> inspect star</span></div></section>
+      </div>
     </aside>
   </section>
   <footer><span>PeTar <i>·</i> INTERACTIVE N-BODY EXPLORER</span><span id="frame-summary">FULL RECORDED SIMULATION · 793 SNAPSHOTS</span><span>POSITIONS & VELOCITIES RELATIVE TO THE MOST MASSIVE PARTICLE</span></footer>
@@ -70,13 +82,16 @@ const [meta, buffer, mergerEvents] = await Promise.all([
 if (buffer.byteLength !== meta.frameCount * meta.particleCount * FIELDS * 4) throw new Error('Snapshot cache size does not match metadata');
 const data = new Float32Array(buffer), ids = meta.particleIds, idToIndex = new Map(ids.map((id, i) => [id, i]));
 const host = document.querySelector<HTMLDivElement>('#scene')!;
+const mergerInset=document.querySelector<HTMLDivElement>('#merger-inset')!,mergerInsetView=document.querySelector<HTMLDivElement>('#merger-inset-view')!,mergerInsetLabel=document.querySelector<HTMLDivElement>('#merger-inset-label')!;
 const scene = new THREE.Scene(); scene.background = new THREE.Color('#090d13');
 const camera = new THREE.PerspectiveCamera(42, 1, 0.0001, 20); camera.position.set(0.055, 0.044, 0.071);
 const mergerCamera = new THREE.PerspectiveCamera(34, 1, 0.000001, 2);
+mergerCamera.layers.set(1);
 const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.outputColorSpace = THREE.SRGBColorSpace;
 await renderer.init();
 host.append(renderer.domElement);
+const mergerRenderer=new WebGLRenderer({antialias:true,alpha:false});mergerRenderer.setPixelRatio(Math.min(devicePixelRatio,1.5));mergerRenderer.outputColorSpace=THREE.SRGBColorSpace;mergerInsetView.append(mergerRenderer.domElement);
 const backend = (renderer as unknown as { backend: { isWebGPUBackend?: boolean } }).backend;
 document.querySelector('#renderer-mode')!.textContent = backend?.isWebGPUBackend ? 'WEBGPU ACTIVE' : 'WEBGL2 FALLBACK';
 const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.dampingFactor = 0.075; controls.screenSpacePanning = true;
@@ -121,10 +136,15 @@ const selectionRing = new THREE.Mesh(new THREE.TorusGeometry(.00066,.000045,8,40
 const selectionGlow = new THREE.Mesh(new THREE.SphereGeometry(.00022,18,12),new THREE.MeshBasicMaterial({color:'#65f5df',transparent:true,opacity:.25,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,depthTest:false}));selectionGlow.visible=false;selectionGlow.renderOrder=6;scene.add(selectionGlow);
 const trailGeometry=new THREE.BufferGeometry(),trailPositions=new Float32Array((meta.frameCount*TRAIL_SAMPLES_PER_SNAPSHOT+8)*3),trailAttribute=new THREE.BufferAttribute(trailPositions,3);trailAttribute.setUsage(THREE.DynamicDrawUsage);trailGeometry.setAttribute('position',trailAttribute);trailGeometry.setDrawRange(0,0);
 const eventTrail=new THREE.Line(trailGeometry,new THREE.LineBasicMaterial({color:'#ff3025',transparent:true,opacity:.88}));eventTrail.visible=false;eventTrail.renderOrder=5;scene.add(eventTrail);
+const eventTrailGeometry=new THREE.BufferGeometry(),eventTrailPositions=new Float32Array(64*3),eventTrailAttribute=new THREE.BufferAttribute(eventTrailPositions,3);eventTrailAttribute.setUsage(THREE.DynamicDrawUsage);eventTrailGeometry.setAttribute('position',eventTrailAttribute);eventTrailGeometry.setDrawRange(0,0);
+const eventViewTrail=new THREE.Line(eventTrailGeometry,new THREE.LineBasicMaterial({color:'#ff735c',transparent:true,opacity:.96,depthTest:false,depthWrite:false,toneMapped:false}));eventViewTrail.layers.set(1);eventViewTrail.renderOrder=9;eventViewTrail.frustumCulled=false;scene.add(eventViewTrail);
+const eventContextStars=new THREE.InstancedMesh(sphere,new THREE.MeshBasicMaterial({color:'#d5e5f2',transparent:true,opacity:.62,toneMapped:false,depthWrite:false}),meta.particleCount);eventContextStars.instanceMatrix.setUsage(THREE.DynamicDrawUsage);eventContextStars.layers.set(1);scene.add(eventContextStars);
+const eventIncoming=new THREE.Mesh(sphere,new THREE.MeshBasicMaterial({color:'#ff4f42',toneMapped:false}));eventIncoming.layers.set(1);eventIncoming.renderOrder=7;scene.add(eventIncoming);
+const eventSurvivor=new THREE.Mesh(sphere,new THREE.MeshBasicMaterial({color:'#ffe0a0',toneMapped:false}));eventSurvivor.layers.set(1);eventSurvivor.renderOrder=7;scene.add(eventSurvivor);
 let activeTrailEvent=-1,trailPointCount=0,trailLastPosition=-1,trailNextSample=0;
-let cinematicEventIndex=-1,cinematicViewDirection=new THREE.Vector3(),cinematicCameraDistance=0;
-const mergerFocus=new THREE.Vector3();
-const mergerInset=document.querySelector<HTMLDivElement>('#merger-inset')!,mergerInsetLabel=document.querySelector<HTMLDivElement>('#merger-inset-label')!;
+let cinematicEventIndex=-1;
+const mergerFocus=new THREE.Vector3(),mergerFocusTarget=new THREE.Vector3(),mergerSurvivorTarget=new THREE.Vector3(),eventIncomingPosition=new THREE.Vector3(),mergerCameraPositionTarget=new THREE.Vector3(),fallbackCameraUp=new THREE.Vector3(0,1,0);
+const orbitalNormal=new THREE.Vector3(),relativePosition=new THREE.Vector3(),relativeVelocity=new THREE.Vector3(),eventTrailStart=new THREE.Vector3(),eventTrailEnd=new THREE.Vector3(),eventTrailControl=new THREE.Vector3(),eventTrailTangent=new THREE.Vector3(),lastOrbitalNormal=new THREE.Vector3(0,0,1);
 function setMatrix(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, scale: number, quaternion = dummy.quaternion) {
   dummy.position.set(x, y, z); dummy.quaternion.copy(quaternion); dummy.scale.setScalar(scale); dummy.updateMatrix(); mesh.setMatrixAt(index, dummy.matrix);
 }
@@ -222,15 +242,16 @@ function putFrame(position: number, updateUi = true) {
   const warningSnapshots=warningEvent?Math.max(0,Math.ceil(timeToFramePosition(warningEvent.eventTimeMyr??warningEvent.timeEndMyr)-framePosition)):0;
   const nextEvent=document.querySelector('#next-event')!;
   const participantLabel=futureEvent?.participantIds?`IDs ${futureEvent.participantIds.join(' + ')}`:`ID ${futureEvent?.incomingId}`;
-  nextEvent.innerHTML=futureEvent?`<span>NEXT ${futureEvent.source==='BSE Coalescence'?'BSE COALESCENCE':'MERGER CANDIDATE'} · ${participantLabel}</span><b>~${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round(futureEvent.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(futureEvent.timeEndMyr*1e6).toLocaleString('en-US')} yr snapshot bracket</b>`:'<span>MERGER EVENTS</span><b>No later merger event in the supplied record</b>';
+  nextEvent.innerHTML=futureEvent?`<span>NEXT ${mergerSourceLabel(futureEvent.source)} · ${participantLabel}</span><b>~${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round(futureEvent.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(futureEvent.timeEndMyr*1e6).toLocaleString('en-US')} yr snapshot bracket</b>`:'<span>MERGER EVENTS</span><b>No later merger event in the supplied record</b>';
   const forecast=document.querySelector('#event-forecast')!;
   forecast.classList.toggle('active',Boolean(eventNow));
   forecast.classList.toggle('warning',Boolean(warningEvent&&!eventNow));
-  forecast.innerHTML=eventNow?`<span>MERGER EVENT · ${eventNow.source==='BSE Coalescence'?'BSE COALESCENCE':'CANDIDATE'}</span><b>ID ${eventNow.incomingId} → ID ${eventNow.survivorId}</b><small>${Math.round((eventNow.eventTimeMyr??eventNow.timeEndMyr)*1e6).toLocaleString('en-US')} yr · snapshot bracket ${Math.round(eventNow.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(eventNow.timeEndMyr*1e6).toLocaleString('en-US')} yr</small>`:warningEvent?`<span>MERGER WARNING · ${warningEvent.source==='BSE Coalescence'?'BSE COALESCENCE':'CANDIDATE'}</span><b>ID ${warningEvent.incomingId} → ID ${warningEvent.survivorId}</b><small>~${warningSnapshots} snapshots · T−${Math.max(0,Math.round((warningEvent.eventTimeMyr??warningEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr</small>`:futureEvent?`<span>NEXT MERGER · ${futureEvent.source==='BSE Coalescence'?'BSE EVENT':'CANDIDATE'}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
+  forecast.innerHTML=eventNow?`<span>MERGER EVENT · ${mergerSourceLabel(eventNow.source)}</span><b>ID ${eventNow.incomingId} → ID ${eventNow.survivorId}</b><small>${Math.round((eventNow.eventTimeMyr??eventNow.timeEndMyr)*1e6).toLocaleString('en-US')} yr · snapshot bracket ${Math.round(eventNow.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(eventNow.timeEndMyr*1e6).toLocaleString('en-US')} yr</small>`:warningEvent?`<span>MERGER WARNING · ${mergerSourceLabel(warningEvent.source)}</span><b>ID ${warningEvent.incomingId} → ID ${warningEvent.survivorId}</b><small>~${warningSnapshots} snapshots · T−${Math.max(0,Math.round((warningEvent.eventTimeMyr??warningEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr</small>`:futureEvent?`<span>NEXT MERGER · ${mergerSourceLabel(futureEvent.source)}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
   updatePlayButton();
 }
-function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
-new ResizeObserver(resize).observe(host); resize();
+function resizeMergerRenderer(){const w=mergerInsetView.clientWidth,h=mergerInsetView.clientHeight;if(w<=0||h<=0)return;mergerRenderer.setSize(w,h,false);mergerCamera.aspect=w/h;mergerCamera.updateProjectionMatrix();}
+function resize() { const w = host.clientWidth, h = host.clientHeight; if(w<=0||h<=0)return;renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();resizeMergerRenderer(); }
+new ResizeObserver(resize).observe(host);new ResizeObserver(resizeMergerRenderer).observe(mergerInset); resize();
 renderer.setAnimationLoop((now: number) => {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   let cinematicEvent=syncMergerCinematic();
@@ -254,10 +275,7 @@ renderer.setAnimationLoop((now: number) => {
     diffraction.instanceMatrix.needsUpdate = true; lastDiffractionOrientation.copy(cameraQuaternion);
   }
   renderer.setScissorTest(false);renderer.setViewport(0,0,host.clientWidth,host.clientHeight);renderer.render(scene, camera);
-  if(cinematicEvent){
-    const bounds=host.getBoundingClientRect(),rect=mergerInset.getBoundingClientRect(),x=rect.left-bounds.left,y=bounds.bottom-rect.bottom,w=rect.width,h=rect.height;
-    mergerCamera.aspect=w/h;mergerCamera.updateProjectionMatrix();renderer.setViewport(x,y,w,h);renderer.setScissor(x,y,w,h);renderer.setScissorTest(true);renderer.clearDepth();renderer.render(scene,mergerCamera);renderer.setScissorTest(false);
-  }
+  if(cinematicEvent)mergerRenderer.render(scene,mergerCamera);
 });
 function updatePlayButton() {
   const atEnd = framePosition >= meta.frameCount - 1;
@@ -270,23 +288,67 @@ function updatePlayButton() {
 }
 function syncMergerCinematic(){
   const enabled=(document.querySelector<HTMLInputElement>('#merger-cinematic')!).checked;
+  const trailWindow=Number((document.querySelector<HTMLSelectElement>('#event-trail-window')!).value)||50;
   if(!enabled)cinematicEventIndex=-1;
-  if(cinematicEventIndex>=0&&framePosition>mergerEvents[cinematicEventIndex].postIndex+1e-4)cinematicEventIndex=-1;
-  if(enabled&&playing&&cinematicEventIndex<0){
-    cinematicEventIndex=mergerEvents.findIndex(event=>{const eventPosition=timeToFramePosition(event.eventTimeMyr??event.timeEndMyr);return framePosition>=eventPosition-1&&framePosition<=event.postIndex;});
-    if(cinematicEventIndex>=0){cinematicViewDirection.copy(camera.position).sub(controls.target).normalize();cinematicCameraDistance=camera.position.distanceTo(controls.target);}
-  }
+  cinematicEventIndex=enabled?mergerEvents.findIndex(event=>{const eventPosition=timeToFramePosition(event.eventTimeMyr??event.timeEndMyr);return framePosition>=Math.max(0,eventPosition-trailWindow)&&framePosition<=eventPosition+.32;}):-1;
   const event=cinematicEventIndex>=0?mergerEvents[cinematicEventIndex]:undefined;
   mergerInset.hidden=!event;
-  if(event)mergerInsetLabel.textContent=`MERGER ${cinematicEventIndex+1} / ${mergerEvents.length} · ID ${event.incomingId} · SLOW ×${MERGER_SLOWDOWN_FACTOR}`;
+  if(event)mergerInsetLabel.textContent=`MERGER ${cinematicEventIndex+1} / ${mergerEvents.length} · ${event.incomingId} + ${event.survivorId} · RECONSTRUCTED PATH`;
   return event;
 }
 function updateMergerInsetCamera(event?:MergerEvent){
-  if(!event)return;
-  const slot=idToIndex.get(event.incomingId);if(slot===undefined)return;
-  const state=particleStates[slot],focus=state.present?mergerFocus.set(state.x,state.y,state.z):mergerFocus.set(0,0,0);
-  const closeupDistance=THREE.MathUtils.clamp(cinematicCameraDistance*.12,.0012,.0035);
-  mergerCamera.position.copy(focus).addScaledVector(cinematicViewDirection,closeupDistance);mergerCamera.up.copy(camera.up);mergerCamera.lookAt(focus);
+  if(!event){eventViewTrail.visible=false;eventTrailGeometry.setDrawRange(0,0);return;}
+  const incoming=particleStates[idToIndex.get(event.incomingId)??-1],survivor=particleStates[idToIndex.get(event.survivorId)??-1];
+  const incomingSlot=idToIndex.get(event.incomingId)??-1;
+  const trailPoint=incomingSlot>=0?getEventTrailPoint(incomingSlot,framePosition,event,(document.querySelector<HTMLSelectElement>('#interpolation')!).value):null;
+  const pIn=incoming?.present?eventIncomingPosition.set(incoming.x,incoming.y,incoming.z):trailPoint?eventIncomingPosition.set(...trailPoint):eventIncomingPosition.set(0,0,0);
+  const pSur=survivor?.present?mergerSurvivorTarget.set(survivor.x,survivor.y,survivor.z):mergerSurvivorTarget.set(0,0,0);
+  const separation=pIn.distanceTo(pSur);
+  mergerFocusTarget.copy(pIn).add(pSur).multiplyScalar(.5);
+  mergerFocus.lerp(mergerFocusTarget,.14);
+  relativePosition.subVectors(pIn,pSur);
+  relativeVelocity.set((incoming?.vx??0)-(survivor?.vx??0),(incoming?.vy??0)-(survivor?.vy??0),(incoming?.vz??0)-(survivor?.vz??0));
+  orbitalNormal.crossVectors(relativePosition,relativeVelocity);
+  if(orbitalNormal.lengthSq()>1e-18){orbitalNormal.normalize();if(orbitalNormal.dot(lastOrbitalNormal)<0)orbitalNormal.negate();lastOrbitalNormal.copy(orbitalNormal);}
+  else orbitalNormal.copy(lastOrbitalNormal);
+  // Keep enough of the local cluster in frame to give the encounter context.
+  // The previous sub-milliparsec floor cropped every unrelated companion out.
+  const closeupDistance=THREE.MathUtils.clamp(Math.max(separation*3.2,.0022),.0022,.04);
+  mergerCameraPositionTarget.copy(mergerFocus).addScaledVector(orbitalNormal,closeupDistance);
+  mergerCamera.position.lerp(mergerCameraPositionTarget,.16);mergerCamera.up.copy(relativePosition.lengthSq()>1e-18?relativePosition.normalize():fallbackCameraUp);mergerCamera.lookAt(mergerFocus);
+  updateEventViewObjects(event,survivor,pIn,pSur);
+}
+function updateEventViewObjects(event:MergerEvent,survivor:{x:number;y:number;z:number;present:boolean},pIn:THREE.Vector3,pSur:THREE.Vector3){
+  // Keep context particles point-like at close range. A fixed world-space radius
+  // made one background star balloon into a hollow-looking ring in the inset.
+  const contextStarSize=THREE.MathUtils.clamp(pIn.distanceTo(pSur)*.014,.000006,.000018);
+  for(let i=0;i<meta.particleCount;i++){
+    const s=particleStates[i],size=s.present&&i!==idToIndex.get(event.incomingId)&&i!==idToIndex.get(event.survivorId)?contextStarSize:0;
+    setMatrix(eventContextStars,i,s.x,s.y,s.z,size);
+  }
+  eventContextStars.count=meta.particleCount;eventContextStars.instanceMatrix.needsUpdate=true;
+  const inPosition=pIn, survivorPosition=survivor.present?pSur:mergerFocus;
+  eventIncoming.position.copy(inPosition);eventIncoming.scale.setScalar(.00012);
+  eventSurvivor.position.copy(survivorPosition);eventSurvivor.scale.setScalar(.00015);
+  eventIncoming.visible=true;eventSurvivor.visible=true;
+  const mode=(document.querySelector<HTMLSelectElement>('#interpolation')!).value,eventPosition=timeToFramePosition(event.eventTimeMyr??event.timeEndMyr),trailWindow=Number((document.querySelector<HTMLSelectElement>('#event-trail-window')!).value)||50,end=Math.min(framePosition,eventPosition),start=Math.max(0,eventPosition-trailWindow),count=Math.max(2,Math.min(44,Math.ceil((end-start)*.9)+1));
+  let written=0;
+  for(let j=0;j<count;j++){
+    const p=start+(end-start)*j/(count-1),point=getEventTrailPoint(idToIndex.get(event.incomingId)??-1,p,event,mode);if(!point)continue;
+    eventTrailPositions[written*3]=point[0];eventTrailPositions[written*3+1]=point[1];eventTrailPositions[written*3+2]=point[2];written++;
+  }
+  eventTrailStart.copy(pIn);eventTrailEnd.copy(pSur);eventTrailControl.copy(pIn).add(pSur).multiplyScalar(.5);
+  eventTrailTangent.copy(relativeVelocity).addScaledVector(orbitalNormal,-relativeVelocity.dot(orbitalNormal));
+  if(eventTrailTangent.lengthSq()<1e-18)eventTrailTangent.crossVectors(relativePosition,orbitalNormal);
+  if(eventTrailTangent.lengthSq()>1e-18)eventTrailControl.addScaledVector(eventTrailTangent.normalize(),pIn.distanceTo(pSur)*.2);
+  const closureSamples=18;
+  for(let j=1;j<=closureSamples&&written<64;j++){
+    const u=j/closureSamples,v=1-u;
+    eventTrailPositions[written*3]=v*v*eventTrailStart.x+2*v*u*eventTrailControl.x+u*u*eventTrailEnd.x;
+    eventTrailPositions[written*3+1]=v*v*eventTrailStart.y+2*v*u*eventTrailControl.y+u*u*eventTrailEnd.y;
+    eventTrailPositions[written*3+2]=v*v*eventTrailStart.z+2*v*u*eventTrailControl.z+u*u*eventTrailEnd.z;written++;
+  }
+  eventTrailAttribute.needsUpdate=true;eventTrailGeometry.setDrawRange(0,written);eventTrailGeometry.computeBoundingSphere();eventViewTrail.visible=written>1;
 }
 function setPlaying(value: boolean) { playing = value; last = performance.now(); updatePlayButton(); }
 (document.querySelector('#timeline') as HTMLInputElement).max = String(meta.timeMyr.at(-1)!);
@@ -323,6 +385,7 @@ document.addEventListener('keydown',event=>{
   putFrame(framePosition+direction*(event.shiftKey?10:1));
 },true);
 document.querySelector('#interpolation')!.addEventListener('change', () => putFrame(framePosition));
+document.querySelector('#event-trail-window')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#colour-mode')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#diffraction')!.addEventListener('change', () => { diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked; });
 document.querySelector('#view-range')!.addEventListener('change', event => {
@@ -383,26 +446,32 @@ function updateSelectionIndicator(){
 }
 function drawMassChart(position:number){
   const canvas=document.querySelector<HTMLCanvasElement>('#mass-chart')!,rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
+  const chartScale=THREE.MathUtils.clamp(window.innerWidth/1440,1,1.4),layout={left:MASS_CHART_LAYOUT.left*chartScale,right:MASS_CHART_LAYOUT.right*chartScale,top:MASS_CHART_LAYOUT.top*chartScale,bottom:MASS_CHART_LAYOUT.bottom*chartScale};
   const dpr=Math.min(devicePixelRatio||1,2),key=`${rect.width}x${rect.height}@${dpr}`;
   if(key!==lastChartSize){canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);lastChartSize=key;}
-  const ctx=canvas.getContext('2d')!;ctx.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,{left,right,top,bottom}=MASS_CHART_LAYOUT;ctx.clearRect(0,0,w,h);
+  const ctx=canvas.getContext('2d')!;ctx.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,{left,right,top,bottom}=layout;ctx.clearRect(0,0,w,h);
   const vals=meta.centerMassMsun,rawMin=Math.min(...vals),rawMax=Math.max(...vals),rawSpan=Math.max(rawMax-rawMin,1),roughStep=rawSpan/4,magnitude=10**Math.floor(Math.log10(roughStep)),scaled=roughStep/magnitude,step=(scaled<=1?1:scaled<=2?2:scaled<=5?5:10)*magnitude,min=Math.floor(rawMin/step)*step,max=Math.ceil(rawMax/step)*step||min+step,span=Math.max(max-min,step),plotHeight=h-top-bottom,plotWidth=w-left-right;
   const yFor=(mass:number)=>top+plotHeight-(mass-min)/span*plotHeight;
-  ctx.font="8px 'DM Mono', monospace";ctx.textAlign='right';ctx.textBaseline='middle';ctx.lineWidth=1;
+  ctx.font=`${8*chartScale}px 'DM Mono', monospace`;ctx.textAlign='right';ctx.textBaseline='middle';ctx.lineWidth=1;
   for(let tick=min;tick<=max+step*.01;tick+=step){const y=yFor(tick);ctx.strokeStyle='#34403d';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();ctx.fillStyle='#929d98';ctx.fillText(Math.round(tick).toLocaleString('en-US'),left-5,y);}
   const startTime=meta.timeMyr[0],endTime=meta.timeMyr.at(-1)!,durationYears=(endTime-startTime)*1e6,logDuration=Math.log10(1+durationYears/100),xForTime=(timeMyr:number)=>left+plotWidth*Math.log10(1+Math.max(0,(timeMyr-startTime)*1e6)/100)/logDuration;
-  const lanes=[-Infinity,-Infinity,-Infinity,-Infinity];
-  mergerEvents.forEach((event,index)=>{
-    const eventTime=event.eventTimeMyr??event.timeEndMyr,x=xForTime(eventTime),lane=lanes.findIndex(lastX=>x-lastX>=13),chosenLane=lane>=0?lane:lanes.indexOf(Math.min(...lanes)),labelX=THREE.MathUtils.clamp(Math.max(x,lanes[chosenLane]+13),left+6,w-right-6),labelY=4+chosenLane*7,color=event.centralMergerCandidate?'#ff8070':'#c2a36e';
-    lanes[chosenLane]=labelX;ctx.save();ctx.globalAlpha=.46;ctx.strokeStyle=color;ctx.setLineDash([2,2]);ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();ctx.restore();
-    if(Math.abs(labelX-x)>2){ctx.strokeStyle=color;ctx.globalAlpha=.75;ctx.beginPath();ctx.moveTo(x,labelY+3);ctx.lineTo(labelX,labelY+3);ctx.stroke();ctx.globalAlpha=1;}
-    ctx.fillStyle=event.centralMergerCandidate?'#4b201c':'#30291d';ctx.fillRect(labelX-6,labelY-4,12,8);ctx.strokeStyle=color;ctx.strokeRect(labelX-6,labelY-4,12,8);ctx.fillStyle=color;ctx.font="7px 'DM Mono', monospace";ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(index+1),labelX,labelY);
+  const labelGap=15*chartScale,labelHalf=6*chartScale,labelMin=left+labelHalf,labelMax=w-right-labelHalf;
+  const eventMarks=mergerEvents.map((event,index)=>({event,index,x:xForTime(event.eventTimeMyr??event.timeEndMyr),labelX:0}));
+  eventMarks.forEach((mark,index)=>{mark.labelX=THREE.MathUtils.clamp(mark.x,labelMin,labelMax);if(index)mark.labelX=Math.max(mark.labelX,eventMarks[index-1].labelX+labelGap);});
+  if(eventMarks.length&&eventMarks.at(-1)!.labelX>labelMax){eventMarks.at(-1)!.labelX=labelMax;for(let index=eventMarks.length-2;index>=0;index--)eventMarks[index].labelX=Math.min(eventMarks[index].labelX,eventMarks[index+1].labelX-labelGap);}
+  eventMarks.forEach(({event,index,x,labelX})=>{
+    const labelY=10*chartScale,color=event.centralMergerCandidate?'#ff8070':'#c2a36e';
+    ctx.save();ctx.globalAlpha=.46;ctx.strokeStyle=color;ctx.setLineDash([2,2]);ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();ctx.restore();
+    if(Math.abs(labelX-x)>2){ctx.strokeStyle=color;ctx.globalAlpha=.75;ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(labelX,labelY+4*chartScale);ctx.stroke();ctx.globalAlpha=1;}
+    ctx.fillStyle=event.centralMergerCandidate?'#4b201c':'#30291d';ctx.fillRect(labelX-6*chartScale,labelY-4*chartScale,12*chartScale,8*chartScale);ctx.strokeStyle=color;ctx.strokeRect(labelX-6*chartScale,labelY-4*chartScale,12*chartScale,8*chartScale);ctx.fillStyle=color;ctx.font=`${7*chartScale}px 'DM Mono', monospace`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(index+1),labelX,labelY);
   });
   ctx.strokeStyle='#d8bd7e';ctx.lineWidth=1.5;ctx.beginPath();
   vals.forEach((v,i)=>{const x=xForTime(meta.timeMyr[i]),y=yFor(v);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
   const lo=Math.floor(position),hi=Math.ceil(position),time=THREE.MathUtils.lerp(meta.timeMyr[lo],meta.timeMyr[hi],position-lo),x=xForTime(time);ctx.strokeStyle='#ff7063';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();
-  const cursorLabel=document.querySelector<HTMLSpanElement>('#mass-chart-current')!;cursorLabel.textContent=`${Math.round(time*1e6).toLocaleString('en-US')} yr`;cursorLabel.style.left=`${THREE.MathUtils.clamp(100*x/w,5,95)}%`;
-  const ticks=[0,100,1000,10000,durationYears].filter((value,index,array)=>value<=durationYears&&array.indexOf(value)===index);ctx.font="7px 'DM Mono', monospace";ctx.fillStyle='#929d98';ctx.textBaseline='bottom';
+  const cursorLabel=document.querySelector<HTMLSpanElement>('#mass-chart-current')!;cursorLabel.textContent=`${Math.round(time*1e6).toLocaleString('en-US')} yr`;
+  const cursorFraction=(x-left)/plotWidth;cursorLabel.hidden=cursorFraction<.015||cursorFraction>.985;const edgeLabels=cursorFraction<.18||cursorFraction>.82;cursorLabel.parentElement?.classList.toggle('edge',edgeLabels);
+  cursorLabel.style.left=`${edgeLabels?50:THREE.MathUtils.clamp(100*x/w,5,95)}%`;
+  const ticks=[0,100,1000,10000,durationYears].filter((value,index,array)=>value<=durationYears&&array.indexOf(value)===index);ctx.font=`${8*chartScale}px 'DM Mono', monospace`;ctx.fillStyle='#929d98';ctx.textBaseline='bottom';
   ticks.forEach((years,index)=>{const tx=left+plotWidth*Math.log10(1+years/100)/logDuration;ctx.strokeStyle='#6d7771';ctx.beginPath();ctx.moveTo(tx,h-bottom);ctx.lineTo(tx,h-bottom+3);ctx.stroke();ctx.textAlign=index===0?'left':index===ticks.length-1?'right':'center';const label=years===0?'0':years===durationYears?`${Math.round(years/1000)}k`:`${years>=1000?`${years/1000}k`:years}`;ctx.fillText(label,tx,h-1);});
 }
 const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
