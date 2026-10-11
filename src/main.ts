@@ -106,7 +106,8 @@ let framePosition = 0, playing = false, last = performance.now();
 let selectedIndex = -1, lastUiUpdate = 0, lastChartSize = '';
 let cameraQuaternion = new THREE.Quaternion();
 const lastDiffractionOrientation = new THREE.Quaternion(0, 0, 0, 0);
-const selectionRing = new THREE.Mesh(new THREE.TorusGeometry(.00042,.000025,6,32),new THREE.MeshBasicMaterial({color:'#fff0a8',toneMapped:false})); selectionRing.visible=false; scene.add(selectionRing);
+const selectionRing = new THREE.Mesh(new THREE.TorusGeometry(.00066,.000045,8,40),new THREE.MeshBasicMaterial({color:'#8ff5e8',toneMapped:false,depthTest:false})); selectionRing.visible=false; selectionRing.renderOrder=7; scene.add(selectionRing);
+const selectionGlow = new THREE.Mesh(new THREE.SphereGeometry(.00022,18,12),new THREE.MeshBasicMaterial({color:'#65f5df',transparent:true,opacity:.25,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,depthTest:false}));selectionGlow.visible=false;selectionGlow.renderOrder=6;scene.add(selectionGlow);
 const mergerRing = new THREE.Mesh(new THREE.TorusGeometry(.00058,.000055,8,40),new THREE.MeshBasicMaterial({color:'#ff4038',toneMapped:false})); mergerRing.visible=false; mergerRing.renderOrder=6; scene.add(mergerRing);
 const mergerGlow = new THREE.Mesh(new THREE.SphereGeometry(.00028,18,12),new THREE.MeshBasicMaterial({color:'#ff332b',transparent:true,opacity:.34,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false}));mergerGlow.visible=false;mergerGlow.renderOrder=5;scene.add(mergerGlow);
 const eventTrails = mergerEvents.map(()=>{const geometry=new THREE.BufferGeometry();const material=new THREE.LineBasicMaterial({color:'#ff514b',transparent:true,opacity:.9});const line=new THREE.Line(geometry,material);line.visible=false;line.renderOrder=5;scene.add(line);return line;});
@@ -176,8 +177,7 @@ function putFrame(position: number, updateUi = true) {
   const timeMyr = continuous ? THREE.MathUtils.lerp(t0, t1, alpha) : meta.timeMyr[displayFrame];
   const time = timeMyr * 1e6;
   const snapshotLabel = continuous && alpha > 0.005 ? `BETWEEN ${lower}–${upper} · ${mode.toUpperCase()}` : `SNAPSHOT ${String(displayFrame).padStart(3, '0')} / ${meta.frameCount - 1}`;
-  selectionRing.visible=selectedIndex>=0 && particleStates[selectedIndex].present;
-  if(selectionRing.visible){const s=particleStates[selectedIndex];selectionRing.position.set(s.x,s.y,s.z);selectionRing.quaternion.copy(camera.quaternion);selectionRing.scale.setScalar(2.3);}
+  updateSelectionIndicator();
   updateEventTrails(displayFrame);
   const activeMerger=mergerEvents.find(e=>displayFrame>=Math.max(0,e.preIndex-4)&&displayFrame<=e.preIndex);
   const mergerSlot=activeMerger?idToIndex.get(activeMerger.disappearedId):undefined;
@@ -281,6 +281,12 @@ function updateTargetMonitor(){
   const typeCode=Math.round(s.type),typeName=typeNames[typeCode]??'unknown';
   box.innerHTML=`<div><span>MASS</span><b>${s.mass.toFixed(2)} M☉</b></div><div><span>BSE TYPE</span><b>${typeName} (${typeCode})</b></div><div><span>POSITION · pc</span><b>${s.x.toExponential(2)}, ${s.y.toExponential(2)}, ${s.z.toExponential(2)}</b></div><div><span>VELOCITY · km/s</span><b>${(s.vx*.977792).toFixed(2)}, ${(s.vy*.977792).toFixed(2)}, ${(s.vz*.977792).toFixed(2)}</b></div><div><span>SPEED / RADIUS</span><b>${speed.toFixed(2)} km/s · ${dist.toExponential(2)} pc</b></div><div><span>BSE RADIUS / LUMINOSITY</span><b>${s.radius.toFixed(2)} R☉ · ${s.lum.toExponential(2)} L☉</b></div>`;
 }
+function updateSelectionIndicator(){
+  const visible=selectedIndex>=0&&particleStates[selectedIndex].present;selectionRing.visible=selectionGlow.visible=visible;
+  if(!visible)return;
+  const s=particleStates[selectedIndex];selectionRing.position.set(s.x,s.y,s.z);selectionGlow.position.copy(selectionRing.position);selectionRing.quaternion.copy(camera.quaternion);
+  const scale=Math.max(1.35,Math.min(2.8,1.45+Math.sqrt(Math.max(s.mass,1)/100)));selectionRing.scale.setScalar(scale);selectionGlow.scale.setScalar(scale*1.2);
+}
 function drawMassChart(position:number){
   const canvas=document.querySelector<HTMLCanvasElement>('#mass-chart')!,rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
   const dpr=Math.min(devicePixelRatio||1,2),key=`${rect.width}x${rect.height}@${dpr}`;
@@ -295,5 +301,5 @@ const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
 const projected=new THREE.Vector3();
 renderer.domElement.addEventListener('click',(event:MouseEvent)=>{const rect=renderer.domElement.getBoundingClientRect();pointer.set(((event.clientX-rect.left)/rect.width)*2-1,-((event.clientY-rect.top)/rect.height)*2+1);raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObject(stars);let best=hits[0]?.instanceId??-1,bestDistance=18;
   if(best<0){for(let i=0;i<meta.particleCount;i++){if(!particleStates[i].present)continue;projected.set(renderedPositions[i*3],renderedPositions[i*3+1],renderedPositions[i*3+2]).project(camera);if(projected.z < -1 || projected.z > 1)continue;const px=rect.left+(projected.x+1)*rect.width/2,py=rect.top+(1-projected.y)*rect.height/2,d=Math.hypot(px-event.clientX,py-event.clientY);if(d<bestDistance){best=i;bestDistance=d;}}}
-  if(best>=0){selectedIndex=best;updateTargetMonitor();}});
+  if(best>=0){selectedIndex=best;updateSelectionIndicator();updateTargetMonitor();}});
 document.querySelector('#mass-chart')!.addEventListener('click',event=>{const mouse=event as MouseEvent,rect=(event.currentTarget as HTMLCanvasElement).getBoundingClientRect();putFrame(THREE.MathUtils.clamp((mouse.clientX-rect.left)/rect.width,0,1)*(meta.frameCount-1));});
