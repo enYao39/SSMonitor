@@ -8,6 +8,8 @@ type Metadata = {
 };
 type MergerEvent = { preIndex:number; postIndex:number; timeStartMyr:number; timeEndMyr:number; eventTimeMyr?:number; incomingId:number; survivorId:number; participantIds?:number[]; survivorMassGainMsun:number|null; centralMergerCandidate:boolean; source?:string; label:string };
 const FIELDS = 11;
+// Begin a visible warning four saved outputs before the BSE merger time.
+const MERGER_WARNING_SNAPSHOTS = 4;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
 <header class="topbar">
@@ -207,12 +209,15 @@ function putFrame(position: number, updateUi = true) {
   updateTargetMonitor(); drawMassChart(framePosition);
   const eventNow=mode==='raw'?mergerEvents.find(e=>displayFrame===e.postIndex&&timeMyr>=(e.eventTimeMyr??e.timeEndMyr)):mergerEvents.find(e=>lower===e.preIndex&&upper===e.postIndex&&timeMyr>=(e.eventTimeMyr??e.timeEndMyr));
   const futureEvent=mergerEvents.find(e=>(e.eventTimeMyr!==undefined?e.eventTimeMyr*1e6:meta.timeMyr[e.postIndex]*1e6)>time);
+  const warningEvent=futureEvent&&timeToFramePosition(futureEvent.eventTimeMyr??futureEvent.timeEndMyr)-framePosition<=MERGER_WARNING_SNAPSHOTS?futureEvent:undefined;
+  const warningSnapshots=warningEvent?Math.max(0,Math.ceil(timeToFramePosition(warningEvent.eventTimeMyr??warningEvent.timeEndMyr)-framePosition)):0;
   const nextEvent=document.querySelector('#next-event')!;
   const participantLabel=futureEvent?.participantIds?`IDs ${futureEvent.participantIds.join(' + ')}`:`ID ${futureEvent?.incomingId}`;
   nextEvent.innerHTML=futureEvent?`<span>NEXT ${futureEvent.source==='BSE Coalescence'?'BSE COALESCENCE':'MERGER CANDIDATE'} · ${participantLabel}</span><b>~${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round(futureEvent.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(futureEvent.timeEndMyr*1e6).toLocaleString('en-US')} yr snapshot bracket</b>`:'<span>MERGER EVENTS</span><b>No later merger event in the supplied record</b>';
   const forecast=document.querySelector('#event-forecast')!;
   forecast.classList.toggle('active',Boolean(eventNow));
-  forecast.innerHTML=eventNow?`<span>MERGER EVENT · ${eventNow.source==='BSE Coalescence'?'BSE COALESCENCE':'CANDIDATE'}</span><b>ID ${eventNow.incomingId} → ID ${eventNow.survivorId}</b><small>${Math.round((eventNow.eventTimeMyr??eventNow.timeEndMyr)*1e6).toLocaleString('en-US')} yr · snapshot bracket ${Math.round(eventNow.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(eventNow.timeEndMyr*1e6).toLocaleString('en-US')} yr</small>`:futureEvent?`<span>NEXT MERGER · ${futureEvent.source==='BSE Coalescence'?'BSE EVENT':'CANDIDATE'}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
+  forecast.classList.toggle('warning',Boolean(warningEvent&&!eventNow));
+  forecast.innerHTML=eventNow?`<span>MERGER EVENT · ${eventNow.source==='BSE Coalescence'?'BSE COALESCENCE':'CANDIDATE'}</span><b>ID ${eventNow.incomingId} → ID ${eventNow.survivorId}</b><small>${Math.round((eventNow.eventTimeMyr??eventNow.timeEndMyr)*1e6).toLocaleString('en-US')} yr · snapshot bracket ${Math.round(eventNow.timeStartMyr*1e6).toLocaleString('en-US')}–${Math.round(eventNow.timeEndMyr*1e6).toLocaleString('en-US')} yr</small>`:warningEvent?`<span>MERGER WARNING · ${warningEvent.source==='BSE Coalescence'?'BSE COALESCENCE':'CANDIDATE'}</span><b>ID ${warningEvent.incomingId} → ID ${warningEvent.survivorId}</b><small>~${warningSnapshots} snapshots · T−${Math.max(0,Math.round((warningEvent.eventTimeMyr??warningEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr</small>`:futureEvent?`<span>NEXT MERGER · ${futureEvent.source==='BSE Coalescence'?'BSE EVENT':'CANDIDATE'}</span><b>ID ${futureEvent.incomingId} → ID ${futureEvent.survivorId}</b><small>T−${Math.max(0,Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6-time)).toLocaleString('en-US')} yr · ${Math.round((futureEvent.eventTimeMyr??futureEvent.timeEndMyr)*1e6).toLocaleString('en-US')} yr</small>`:'<span>MERGER FORECAST</span><b>No further merger events in this record</b>';
   updatePlayButton();
 }
 function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
