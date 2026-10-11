@@ -47,14 +47,6 @@ app.innerHTML = `
         <div class="stat-footer"><span class="status-pip"></span> MOST MASSIVE PARTICLE <span class="footer-right" id="center-id">—</span></div>
       </div>
       <div class="history panel"><div class="section-kicker">CENTRAL STAR MASS <span>M☉ · LOG TIME →</span></div><canvas id="mass-chart" aria-label="Central star mass over logarithmic time in years; numbered markers identify mergers in the event menu"></canvas><div class="chart-labels"><span id="mass-chart-start">0 yr</span><span id="mass-chart-current">—</span><span id="mass-chart-end">—</span></div><div class="chart-key"><i class="chart-vms-key"></i>VMS merger <i class="chart-other-key"></i>other merger · numbers match merger menu</div></div>
-      <div class="controls panel"><div class="control-head"><div class="section-kicker">TIME CONTROL</div><span class="frame-count" id="frame-count">793 SNAPSHOTS</span></div>
-        <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button><button id="reset-time" class="step-button reset-time" aria-label="Return to start">↶</button></div>
-        <div class="rate-row"><label for="speed">SIMULATION TIME / REAL SECOND</label><select id="speed" aria-label="Simulation years per real second"><option value="10">10 yr/s</option><option value="25">25 yr/s</option><option value="50">50 yr/s</option><option value="100" selected>100 yr/s</option><option value="250">250 yr/s</option><option value="500">500 yr/s</option><option value="1000">1,000 yr/s</option></select></div>
-        <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline" aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
-        <div class="event-jump-row"><label for="event-select">JUMP TO MERGER</label><select id="event-select" aria-label="Jump to merger event"><option value="">Select an event…</option></select></div>
-        <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
-        <div class="play-hint" id="play-hint">←/→ anywhere: one snapshot · Shift+←/→: ten</div>
-      </div>
       <div class="monitor panel"><div class="section-kicker">TARGET MONITOR <span id="target-status">CLICK A STAR</span></div><div id="target-details" class="target-details"><span>Select a particle in the 3D view to follow its motion and BSE properties.</span></div></div>
       <div class="settings panel">
         <div class="section-kicker settings-heading">DISPLAY SETTINGS <span>VIEW · TRAJECTORY · LIGHT</span></div>
@@ -70,6 +62,14 @@ app.innerHTML = `
         <section class="interaction settings-interaction"><div class="section-kicker">NAVIGATE THE SYSTEM</div><div class="interaction-keys"><span><b>DRAG</b> rotate</span><span><b>SCROLL</b> zoom</span><span><b>RIGHT-DRAG</b> pan</span><span><b>CLICK</b> inspect star</span></div></section>
       </div>
     </aside>
+    <div class="controls panel"><div class="control-head"><div class="section-kicker">TIME CONTROL</div><span class="frame-count" id="frame-count">793 SNAPSHOTS</span></div>
+      <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button><button id="reset-time" class="step-button reset-time" aria-label="Return to start">↶</button></div>
+      <div class="rate-row"><label for="speed">SIMULATION TIME / REAL SECOND</label><select id="speed" aria-label="Simulation years per real second"><option value="10">10 yr/s</option><option value="25">25 yr/s</option><option value="50">50 yr/s</option><option value="100" selected>100 yr/s</option><option value="250">250 yr/s</option><option value="500">500 yr/s</option><option value="1000">1,000 yr/s</option></select></div>
+      <div class="range-wrap"><div class="timeline-event-marks" id="timeline-event-marks" aria-hidden="true"></div><input id="timeline" type="range" min="0" value="0" step="0.0000001" aria-label="Simulation timeline" aria-keyshortcuts="ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight"><div class="range-labels"><span id="start-time">0 yr</span><span id="end-time">78,930 yr</span></div></div>
+      <div class="event-jump-row"><label for="event-select">JUMP TO MERGER</label><select id="event-select" aria-label="Jump to merger event"><option value="">Select an event…</option></select></div>
+      <div class="next-event" id="next-event"><span>NEXT MERGER CANDIDATE</span><b>Scanning events…</b></div>
+      <div class="play-hint" id="play-hint">←/→ anywhere: one snapshot · Shift+←/→: ten</div>
+    </div>
   </section>
   <footer><span>PeTar <i>·</i> INTERACTIVE N-BODY EXPLORER</span><span id="frame-summary">FULL RECORDED SIMULATION · 793 SNAPSHOTS</span><span>POSITIONS & VELOCITIES RELATIVE TO THE MOST MASSIVE PARTICLE</span></footer>
 </main>`;
@@ -419,8 +419,8 @@ function getEventTrailPoint(slot:number,position:number,event:MergerEvent,mode:s
 function updateEventTrail(position:number,nextEvent?:MergerEvent){
   const nextIndex=nextEvent?mergerEvents.indexOf(nextEvent):-1,rewind=position<trailLastPosition-1e-6;
   if(nextIndex!==activeTrailEvent||rewind){activeTrailEvent=nextIndex;trailPointCount=0;trailNextSample=(Math.floor(position*TRAIL_SAMPLES_PER_SNAPSHOT)+1)/TRAIL_SAMPLES_PER_SNAPSHOT;trailGeometry.setDrawRange(0,0);eventTrail.visible=false;}
-  if(!nextEvent){trailLastPosition=position;return;}
-  const slot=idToIndex.get(nextEvent.incomingId);if(slot===undefined){trailLastPosition=position;return;}
+  if(!nextEvent){trailPointCount=0;trailGeometry.setDrawRange(0,0);eventTrail.visible=false;trailLastPosition=position;return;}
+  const slot=idToIndex.get(nextEvent.incomingId);if(slot===undefined){trailPointCount=0;trailGeometry.setDrawRange(0,0);eventTrail.visible=false;trailLastPosition=position;return;}
   const mode=(document.querySelector<HTMLSelectElement>('#interpolation')!).value,writePoint=(index:number,point:[number,number,number])=>{const offset=index*3;trailPositions[offset]=point[0];trailPositions[offset+1]=point[1];trailPositions[offset+2]=point[2];};
   if(trailPointCount===0){const initial=getEventTrailPoint(slot,position,nextEvent,mode);if(initial)writePoint(trailPointCount++,initial);}
   const sampleStep=1/TRAIL_SAMPLES_PER_SNAPSHOT;
@@ -446,16 +446,19 @@ function updateSelectionIndicator(){
 }
 function drawMassChart(position:number){
   const canvas=document.querySelector<HTMLCanvasElement>('#mass-chart')!,rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
-  const chartScale=THREE.MathUtils.clamp(window.innerWidth/1440,1,1.4),layout={left:MASS_CHART_LAYOUT.left*chartScale,right:MASS_CHART_LAYOUT.right*chartScale,top:MASS_CHART_LAYOUT.top*chartScale,bottom:MASS_CHART_LAYOUT.bottom*chartScale};
+  // The history card is much narrower than the viewport on wide screens. Size
+  // chart typography from the canvas itself so the wide and compact layouts
+  // use the same readable scale.
+  const chartScale=THREE.MathUtils.clamp(rect.width/440,.88,1.18),layout={left:MASS_CHART_LAYOUT.left*chartScale,right:MASS_CHART_LAYOUT.right*chartScale,top:MASS_CHART_LAYOUT.top*chartScale,bottom:MASS_CHART_LAYOUT.bottom*chartScale};
   const dpr=Math.min(devicePixelRatio||1,2),key=`${rect.width}x${rect.height}@${dpr}`;
   if(key!==lastChartSize){canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);lastChartSize=key;}
   const ctx=canvas.getContext('2d')!;ctx.setTransform(dpr,0,0,dpr,0,0);const w=rect.width,h=rect.height,{left,right,top,bottom}=layout;ctx.clearRect(0,0,w,h);
-  const vals=meta.centerMassMsun,rawMin=Math.min(...vals),rawMax=Math.max(...vals),rawSpan=Math.max(rawMax-rawMin,1),roughStep=rawSpan/4,magnitude=10**Math.floor(Math.log10(roughStep)),scaled=roughStep/magnitude,step=(scaled<=1?1:scaled<=2?2:scaled<=5?5:10)*magnitude,min=Math.floor(rawMin/step)*step,max=Math.ceil(rawMax/step)*step||min+step,span=Math.max(max-min,step),plotHeight=h-top-bottom,plotWidth=w-left-right;
+  const vals=meta.centerMassMsun,rawMin=Math.min(...vals),rawMax=Math.max(...vals),rawSpan=Math.max(rawMax-rawMin,1),plotHeight=h-top-bottom,plotWidth=w-left-right,targetIntervals=Math.max(2,Math.floor(plotHeight/(17*chartScale))),roughStep=rawSpan/targetIntervals,magnitude=10**Math.floor(Math.log10(roughStep)),scaled=roughStep/magnitude,step=(scaled<=1?1:scaled<=2?2:scaled<=5?5:10)*magnitude,min=Math.floor(rawMin/step)*step,max=Math.ceil(rawMax/step)*step||min+step,span=Math.max(max-min,step);
   const yFor=(mass:number)=>top+plotHeight-(mass-min)/span*plotHeight;
   ctx.font=`${8*chartScale}px 'DM Mono', monospace`;ctx.textAlign='right';ctx.textBaseline='middle';ctx.lineWidth=1;
   for(let tick=min;tick<=max+step*.01;tick+=step){const y=yFor(tick);ctx.strokeStyle='#34403d';ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();ctx.fillStyle='#929d98';ctx.fillText(Math.round(tick).toLocaleString('en-US'),left-5,y);}
   const startTime=meta.timeMyr[0],endTime=meta.timeMyr.at(-1)!,durationYears=(endTime-startTime)*1e6,logDuration=Math.log10(1+durationYears/100),xForTime=(timeMyr:number)=>left+plotWidth*Math.log10(1+Math.max(0,(timeMyr-startTime)*1e6)/100)/logDuration;
-  const labelGap=15*chartScale,labelHalf=6*chartScale,labelMin=left+labelHalf,labelMax=w-right-labelHalf;
+  const labelGap=20*chartScale,labelHalf=6*chartScale,labelMin=left+labelHalf,labelMax=w-right-labelHalf;
   const eventMarks=mergerEvents.map((event,index)=>({event,index,x:xForTime(event.eventTimeMyr??event.timeEndMyr),labelX:0}));
   eventMarks.forEach((mark,index)=>{mark.labelX=THREE.MathUtils.clamp(mark.x,labelMin,labelMax);if(index)mark.labelX=Math.max(mark.labelX,eventMarks[index-1].labelX+labelGap);});
   if(eventMarks.length&&eventMarks.at(-1)!.labelX>labelMax){eventMarks.at(-1)!.labelX=labelMax;for(let index=eventMarks.length-2;index>=0;index--)eventMarks[index].labelX=Math.min(eventMarks[index].labelX,eventMarks[index+1].labelX-labelGap);}

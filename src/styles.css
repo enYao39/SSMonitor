@@ -240,24 +240,25 @@
 .settings .control-options{margin-top:8px}
 .settings .advanced-settings .control-options{margin:8px;padding:9px}
 @media(min-width:1200px){
-  .workspace{grid-template-columns:minmax(0,1.9fr) minmax(370px,.92fr);grid-template-areas:"scene stats" "scene history" "scene monitor" "controls settings";gap:14px 18px;align-items:stretch}
-  .scene-panel{grid-area:scene;grid-row:1/span 3;height:min(68vh,740px);min-height:560px}
-  .side{display:contents}
-  .side>.stats{grid-area:stats}.side>.history{grid-area:history}.side>.monitor{grid-area:monitor}.side>.controls{grid-area:controls}.side>.settings{grid-area:settings}
-  .controls{display:grid;width:100%;grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "play" "rate" "timeline" "event" "next" "hint";align-content:start;min-width:0}
+  .workspace{grid-template-columns:minmax(0,1.9fr) minmax(370px,.92fr);grid-template-rows:clamp(560px,68vh,740px) auto;grid-template-areas:"scene side" "controls side";gap:14px 18px;align-items:start}
+  .scene-panel{grid-area:scene;height:100%;min-height:0;align-self:stretch}
+  .side{grid-area:side;display:flex;flex-direction:column;gap:14px;align-self:start;min-width:0}
+  .controls{grid-area:controls;display:grid;width:100%;grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "play" "rate" "timeline" "event" "next" "hint";align-content:start;min-width:0}
   .control-head,.play-row,.rate-row,.range-wrap,.event-jump-row,.next-event,.play-hint{grid-area:auto;min-width:0}
   .play-row{margin-top:14px}.play-button{min-width:0}.rate-row{gap:12px}.rate-row select{width:150px;flex:none}.event-jump-row select{width:min(60%,330px);max-width:60%}
-  .settings{height:100%;display:flex;flex-direction:column}
+  .settings{height:auto;display:flex;flex-direction:column}
   .settings .advanced-settings{flex:none}
-  .settings-appearance{flex:1}
+  .settings-appearance{flex:none}
   .history canvas{height:100px}
 }
 @media(max-width:1199px){
-  .side{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}
+  .workspace{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;grid-template-areas:"scene" "side" "controls";align-items:start}
+  .scene-panel{grid-area:scene}
+  .side{grid-area:side;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}
   .history canvas{height:112px}
   .side>.settings{grid-column:1/-1}
   .side>.monitor{grid-column:1/-1}
-  .controls{grid-column:1/-1;grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "play" "rate" "timeline" "event" "next" "hint";gap:0;align-items:stretch}
+  .controls{grid-area:controls;grid-column:auto;grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "play" "rate" "timeline" "event" "next" "hint";gap:0;align-items:stretch}
   .controls>.control-head,.controls>.play-row,.controls>.rate-row,.controls>.range-wrap,.controls>.event-jump-row,.controls>.next-event,.controls>.play-hint{grid-area:auto;width:100%;min-width:0}
   .controls>.play-row{margin-top:14px}
   .controls>.rate-row{margin-top:12px;gap:12px}
