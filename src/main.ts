@@ -37,9 +37,9 @@ app.innerHTML = `
         <div class="stat-footer"><span class="status-pip"></span> MOST MASSIVE PARTICLE <span class="footer-right" id="center-id">—</span></div>
       </div>
       <div class="controls panel"><div class="control-head"><div class="section-kicker">TIME CONTROL</div><span class="frame-count" id="frame-count">793 SNAPSHOTS</span></div>
-        <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><select id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button></div>
-        <div class="range-wrap"><input id="timeline" type="range" min="0" value="0" step="1" aria-label="Simulation timeline"><div class="range-labels"><span>0 yr</span><span id="end-time">78,930 yr</span></div></div>
-        <div class="play-hint">All snapshots, in order <i>·</i> 10 snapshots/s at 1×</div>
+        <div class="play-row"><button id="play" class="play-button"><span id="play-icon">▶</span><span id="play-label">Play</span></button><select id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><button id="prev" class="step-button" aria-label="Previous snapshot">‹</button><button id="next" class="step-button" aria-label="Next snapshot">›</button><button id="reset-time" class="step-button reset-time" aria-label="Return to start">↶</button></div>
+        <div class="range-wrap"><input id="timeline" type="range" min="0" value="0" step="0.01" aria-label="Simulation timeline"><div class="range-labels"><span>0 yr</span><span id="end-time">78,930 yr</span></div></div>
+        <div class="interp-row"><label for="interpolation">BETWEEN SNAPSHOTS</label><select id="interpolation"><option value="hermite" selected>Cubic Hermite</option><option value="linear">Linear</option><option value="raw">Raw snapshots</option></select></div><div class="play-hint">Full run, in order <i>·</i> 10 snapshot steps/s at 1×</div>
       </div>
       <div class="appearance panel"><div class="section-kicker">LIGHT & COLOUR</div><div class="appearance-row"><label for="colour-mode">STAR COLOUR</label><select id="colour-mode"><option value="temperature" selected>Effective temperature</option><option value="velocity">Relative velocity</option><option value="uniform">Soft white</option></select></div><label class="toggle-row" for="diffraction"><span><b>Diffraction spikes</b><small>Subtle 4-point telescope aperture effect</small></span><input id="diffraction" type="checkbox" checked><span class="switch"></span></label><div class="appearance-note">Temperature colour uses valid BSE luminosity and radius. The VMS keeps a separate display accent.</div></div>
       <div class="interaction panel"><div class="section-kicker">NAVIGATE THE SYSTEM</div><div class="interaction-keys"><span><b>DRAG</b> rotate</span><span><b>SCROLL</b> zoom</span><span><b>RIGHT-DRAG</b> pan</span></div></div>
@@ -79,6 +79,7 @@ const halos = new THREE.InstancedMesh(sphere, haloMaterial, meta.particleCount);
 const centerCore = new THREE.Mesh(new THREE.SphereGeometry(0.00032, 24, 16), new THREE.MeshBasicMaterial({ color: '#fff0c9', toneMapped: false })); scene.add(centerCore);
 const centerHalo = new THREE.Mesh(new THREE.SphereGeometry(0.0011, 20, 14), new THREE.MeshBasicMaterial({ color: '#e2aa60', transparent: true, opacity: 0.075, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })); centerHalo.renderOrder = 2; scene.add(centerHalo);
 const dummy = new THREE.Object3D(), tempColor = new THREE.Color();
+const renderedPositions = new Float32Array(meta.particleCount * 3), renderedDiffractionSizes = new Float32Array(meta.particleCount);
 const diffractionCanvas = document.createElement('canvas'); diffractionCanvas.width = diffractionCanvas.height = 128;
 const cx = diffractionCanvas.getContext('2d')!; const gradient = cx.createRadialGradient(64, 64, 0, 64, 64, 9);
 gradient.addColorStop(0, 'rgba(255,255,255,0.9)'); gradient.addColorStop(0.18, 'rgba(255,255,255,0.58)'); gradient.addColorStop(0.48, 'rgba(255,255,255,0.08)'); gradient.addColorStop(1, 'rgba(255,255,255,0)'); cx.fillStyle = gradient; cx.fillRect(0, 0, 128, 128);
@@ -94,77 +95,124 @@ const blackbodyColor = (kelvin: number): [number, number, number] => {
   else { r = 329.698727446 * ((t - 60) ** -0.1332047592); g = 288.1221695283 * ((t - 60) ** -0.0755148492); b = 255; }
   return [r, g, b].map(c => Math.pow(THREE.MathUtils.clamp(c / 255, 0, 1), 2.2)) as [number, number, number];
 };
-let frame = 0, playing = false, last = performance.now(), accumulator = 0;
+let framePosition = 0, playing = false, last = performance.now();
 let cameraQuaternion = new THREE.Quaternion();
 const lastDiffractionOrientation = new THREE.Quaternion(0, 0, 0, 0);
 function setMatrix(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, scale: number, quaternion = dummy.quaternion) {
   dummy.position.set(x, y, z); dummy.quaternion.copy(quaternion); dummy.scale.setScalar(scale); dummy.updateMatrix(); mesh.setMatrixAt(index, dummy.matrix);
 }
-function putFrame(index: number) {
-  frame = Math.max(0, Math.min(meta.frameCount - 1, index));
-  const base = frame * meta.particleCount * FIELDS, centerIndex = idToIndex.get(meta.centerIds[frame]);
+function putFrame(position: number) {
+  framePosition = THREE.MathUtils.clamp(position, 0, meta.frameCount - 1);
+  const lower = Math.floor(framePosition), upper = Math.min(lower + 1, meta.frameCount - 1), alpha = framePosition - lower;
+  const mode = (document.querySelector<HTMLSelectElement>('#interpolation')!).value;
+  const continuous = lower !== upper && mode !== 'raw' && meta.centerIds[lower] === meta.centerIds[upper] && meta.counts[lower] === meta.counts[upper];
+  const displayFrame = continuous ? (alpha < 0.5 ? lower : upper) : mode === 'raw' ? Math.round(framePosition) : (alpha < 0.5 ? lower : upper);
+  const centerIndex = idToIndex.get(meta.centerIds[displayFrame]);
   const colorMode = (document.querySelector<HTMLSelectElement>('#colour-mode')!).value;
+  const t0 = meta.timeMyr[lower], t1 = meta.timeMyr[upper], dt = t1 - t0;
+  const u = continuous ? alpha : 0, u2 = u * u, u3 = u2 * u;
+  const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u;
+  const h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
   for (let i = 0; i < meta.particleCount; i++) {
-    const o = base + i * FIELDS, present = data[o + 10] > 0.5, x = present ? data[o] : 0, y = present ? data[o + 1] : 0, z = present ? data[o + 2] : 0;
-    const isCenter = i === centerIndex, mass = Math.max(0, data[o + 6]), lum = data[o + 9], radius = data[o + 8];
+    const o0 = lower * meta.particleCount * FIELDS + i * FIELDS;
+    const o1 = upper * meta.particleCount * FIELDS + i * FIELDS;
+    const chosen = continuous ? (alpha < 0.5 ? o0 : o1) : displayFrame * meta.particleCount * FIELDS + i * FIELDS;
+    const present0 = data[o0 + 10] > 0.5, present1 = data[o1 + 10] > 0.5;
+    const interpolateParticle = continuous && present0 && present1;
+    const present = interpolateParticle || data[chosen + 10] > 0.5;
+    let x = present ? data[chosen] : 0, y = present ? data[chosen + 1] : 0, z = present ? data[chosen + 2] : 0;
+    if (interpolateParticle) {
+      if (mode === 'hermite') {
+        x = h00 * data[o0] + h10 * dt * data[o0 + 3] + h01 * data[o1] + h11 * dt * data[o1 + 3];
+        y = h00 * data[o0 + 1] + h10 * dt * data[o0 + 4] + h01 * data[o1 + 1] + h11 * dt * data[o1 + 4];
+        z = h00 * data[o0 + 2] + h10 * dt * data[o0 + 5] + h01 * data[o1 + 2] + h11 * dt * data[o1 + 5];
+      } else {
+        x = THREE.MathUtils.lerp(data[o0], data[o1], alpha); y = THREE.MathUtils.lerp(data[o0 + 1], data[o1 + 1], alpha); z = THREE.MathUtils.lerp(data[o0 + 2], data[o1 + 2], alpha);
+      }
+    }
+    const isCenter = i === centerIndex;
+    const mass = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 6], data[o1 + 6], alpha) : data[chosen + 6];
+    const lum = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 9], data[o1 + 9], alpha) : data[chosen + 9];
+    const radius = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 8], data[o1 + 8], alpha) : data[chosen + 8];
     const visualRadius = isCenter ? 0 : present ? 0.00011 + Math.min(0.00009, Math.log10(Math.max(1, mass)) * 0.000035) : 0;
     setMatrix(stars, i, x, y, z, visualRadius);
     setMatrix(halos, i, x, y, z, visualRadius * 2.35);
     const tempValid = Number.isFinite(lum) && Number.isFinite(radius) && lum > 0 && radius > 0;
     const teff = tempValid ? 5772 * Math.pow(lum, 0.25) / Math.sqrt(radius) : Number.NaN;
-    const colour = isCenter ? [0, 0, 0] : colorMode === 'uniform' ? [0.78, 0.84, 0.91] : colorMode === 'velocity' ? speedColor(Math.hypot(data[o + 3], data[o + 4], data[o + 5]) * 0.977792) : tempValid && Number.isFinite(teff) && teff > 0 ? blackbodyColor(teff) : [0.34, 0.39, 0.47];
+    const vx = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 3], data[o1 + 3], alpha) : data[chosen + 3];
+    const vy = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 4], data[o1 + 4], alpha) : data[chosen + 4];
+    const vz = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 5], data[o1 + 5], alpha) : data[chosen + 5];
+    const colour = isCenter ? [0, 0, 0] : colorMode === 'uniform' ? [0.78, 0.84, 0.91] : colorMode === 'velocity' ? speedColor(Math.hypot(vx, vy, vz) * 0.977792) : tempValid && Number.isFinite(teff) && teff > 0 ? blackbodyColor(teff) : [0.34, 0.39, 0.47];
     tempColor.setRGB(colour[0], colour[1], colour[2]); stars.setColorAt(i, tempColor);
     tempColor.setRGB(colour[0], colour[1], colour[2]); halos.setColorAt(i, tempColor);
     const logLum = tempValid ? THREE.MathUtils.clamp(Math.log10(lum + 1) / 5, 0.12, 1) : 0;
     const diffractionSize = present && !isCenter ? visualRadius * (14 + logLum * 10) : 0;
+    renderedPositions[i * 3] = x; renderedPositions[i * 3 + 1] = y; renderedPositions[i * 3 + 2] = z; renderedDiffractionSizes[i] = diffractionSize;
     setMatrix(diffraction, i, x, y, z, diffractionSize, cameraQuaternion);
   }
   stars.instanceMatrix.needsUpdate = true; halos.instanceMatrix.needsUpdate = true; diffraction.instanceMatrix.needsUpdate = true;
   if (stars.instanceColor) stars.instanceColor.needsUpdate = true; if (halos.instanceColor) halos.instanceColor.needsUpdate = true;
-  const visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked; diffraction.visible = visible;
+  diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked;
   centerCore.position.set(0, 0, 0); centerHalo.position.set(0, 0, 0);
   document.querySelector('#color-mode-label')!.textContent = colorMode === 'temperature' ? 'BLACKBODY COLOUR · BSE L / R' : colorMode === 'velocity' ? 'RELATIVE SPEED · km/s' : 'UNIFORM STAR COLOUR';
-  const time = meta.timeMyr[frame] * 1e6;
+  const timeMyr = continuous ? THREE.MathUtils.lerp(t0, t1, alpha) : meta.timeMyr[displayFrame];
+  const time = timeMyr * 1e6;
+  const snapshotLabel = continuous && alpha > 0.005 ? `BETWEEN ${lower}–${upper} · ${mode.toUpperCase()}` : `SNAPSHOT ${String(displayFrame).padStart(3, '0')} / ${meta.frameCount - 1}`;
   document.querySelector('#time-value')!.textContent = `${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} yr`;
-  document.querySelector('#snapshot-value')!.textContent = `SNAPSHOT ${String(frame).padStart(3, '0')} / ${meta.frameCount - 1}`;
-  document.querySelector('#date-progress')!.textContent = `SNAPSHOT ${frame + 1} OF ${meta.frameCount}`;
-  document.querySelector('#particle-count')!.textContent = meta.counts[frame].toLocaleString('en-US');
-  document.querySelector('#vms-mass')!.textContent = Math.round(meta.centerMassMsun[frame]).toLocaleString('en-US');
-  document.querySelector('#center-id')!.textContent = `ID ${meta.centerIds[frame]}`;
-  (document.querySelector('#timeline') as HTMLInputElement).value = String(frame);
-  document.querySelector('#frame-summary')!.textContent = `SNAPSHOT ${frame + 1} OF ${meta.frameCount} · ${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} YR`;
+  document.querySelector('#snapshot-value')!.textContent = snapshotLabel;
+  document.querySelector('#date-progress')!.textContent = `SNAPSHOT ${displayFrame + 1} OF ${meta.frameCount}`;
+  const particleCount = continuous ? Math.round(THREE.MathUtils.lerp(meta.counts[lower], meta.counts[upper], alpha)) : meta.counts[displayFrame];
+  const vmsMass = continuous ? THREE.MathUtils.lerp(meta.centerMassMsun[lower], meta.centerMassMsun[upper], alpha) : meta.centerMassMsun[displayFrame];
+  const centerId = continuous ? meta.centerIds[lower] : meta.centerIds[displayFrame];
+  document.querySelector('#particle-count')!.textContent = particleCount.toLocaleString('en-US');
+  document.querySelector('#vms-mass')!.textContent = Math.round(vmsMass).toLocaleString('en-US');
+  document.querySelector('#center-id')!.textContent = `ID ${centerId}`;
+  (document.querySelector('#timeline') as HTMLInputElement).value = String(framePosition);
+  document.querySelector('#frame-summary')!.textContent = `${snapshotLabel} · ${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} YR`;
+  updatePlayButton();
 }
 function resize() { const w = host.clientWidth, h = host.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(host); resize();
 renderer.setAnimationLoop((now: number) => {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (playing) {
-    accumulator += dt * Number((document.querySelector<HTMLSelectElement>('#speed')!).value);
-    while (accumulator >= SNAPSHOT_SECONDS && frame < meta.frameCount - 1) { accumulator -= SNAPSHOT_SECONDS; putFrame(frame + 1); }
-    if (frame === meta.frameCount - 1) setPlaying(false);
+    framePosition = Math.min(meta.frameCount - 1, framePosition + dt * Number((document.querySelector<HTMLSelectElement>('#speed')!).value) / SNAPSHOT_SECONDS);
+    putFrame(framePosition);
+    if (framePosition >= meta.frameCount - 1) { playing = false; updatePlayButton(); }
   }
   controls.update(); cameraQuaternion.copy(camera.quaternion);
   if (1 - Math.abs(lastDiffractionOrientation.dot(cameraQuaternion)) > 1e-7) {
-    const base = frame * meta.particleCount * FIELDS, centerIndex = idToIndex.get(meta.centerIds[frame]);
     for (let i = 0; i < meta.particleCount; i++) {
-      const o = base + i * FIELDS, present = data[o + 10] > 0.5, mass = Math.max(0, data[o + 6]);
-      const radius = present && i !== centerIndex ? 0.00011 + Math.min(0.00009, Math.log10(Math.max(1, mass)) * 0.000035) : 0;
-      const logLum = data[o + 9] > 0 ? THREE.MathUtils.clamp(Math.log10(data[o + 9] + 1) / 5, 0.12, 1) : 0;
-      setMatrix(diffraction, i, present ? data[o] : 0, present ? data[o + 1] : 0, present ? data[o + 2] : 0, radius * (14 + logLum * 10), cameraQuaternion);
+      setMatrix(diffraction, i, renderedPositions[i * 3], renderedPositions[i * 3 + 1], renderedPositions[i * 3 + 2], renderedDiffractionSizes[i], cameraQuaternion);
     }
     diffraction.instanceMatrix.needsUpdate = true; lastDiffractionOrientation.copy(cameraQuaternion);
   }
   renderer.render(scene, camera);
 });
-function setPlaying(value: boolean) { playing = value; document.querySelector('#play-icon')!.textContent = value ? 'Ⅱ' : '▶'; document.querySelector('#play-label')!.textContent = value ? 'Pause' : 'Play'; }
+function updatePlayButton() {
+  const atEnd = framePosition >= meta.frameCount - 1;
+  const icon = playing ? 'Ⅱ' : atEnd ? '↺' : '▶';
+  const label = playing ? 'Pause' : atEnd ? 'Replay' : 'Play';
+  const iconElement = document.querySelector('#play-icon')!;
+  const labelElement = document.querySelector('#play-label')!;
+  if (iconElement.textContent !== icon) iconElement.textContent = icon;
+  if (labelElement.textContent !== label) labelElement.textContent = label;
+}
+function setPlaying(value: boolean) { playing = value; last = performance.now(); updatePlayButton(); }
 (document.querySelector('#timeline') as HTMLInputElement).max = String(meta.frameCount - 1);
 document.querySelector('#end-time')!.textContent = `${Math.round(meta.timeMyr.at(-1)! * 1e6).toLocaleString('en-US')} yr`;
 putFrame(0);
-document.querySelector('#play')!.addEventListener('click', () => setPlaying(!playing));
-document.querySelector('#prev')!.addEventListener('click', () => putFrame(frame - 1));
-document.querySelector('#next')!.addEventListener('click', () => putFrame(frame + 1));
+document.querySelector('#play')!.addEventListener('click', () => {
+  if (playing) { setPlaying(false); return; }
+  if (framePosition >= meta.frameCount - 1) putFrame(0);
+  setPlaying(true);
+});
+document.querySelector('#prev')!.addEventListener('click', () => putFrame(Math.max(0, Math.round(framePosition) - 1)));
+document.querySelector('#next')!.addEventListener('click', () => putFrame(Math.min(meta.frameCount - 1, Math.round(framePosition) + 1)));
+document.querySelector('#reset-time')!.addEventListener('click', () => { putFrame(0); setPlaying(false); });
 document.querySelector('#timeline')!.addEventListener('input', event => putFrame(Number((event.target as HTMLInputElement).value)));
-document.querySelector('#colour-mode')!.addEventListener('change', () => putFrame(frame));
+document.querySelector('#interpolation')!.addEventListener('change', () => putFrame(framePosition));
+document.querySelector('#colour-mode')!.addEventListener('change', () => putFrame(framePosition));
 document.querySelector('#diffraction')!.addEventListener('change', () => { diffraction.visible = (document.querySelector<HTMLInputElement>('#diffraction')!).checked; });
 document.querySelector('#view-range')!.addEventListener('change', event => {
   const value = (event.target as HTMLSelectElement).value, half = value === 'auto' ? 0.25 : Number(value);
