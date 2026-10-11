@@ -160,9 +160,9 @@ function putFrame(position: number, updateUi = true) {
     const colour = isCenter ? [0, 0, 0] : colorMode === 'uniform' ? [0.78, 0.84, 0.91] : colorMode === 'type' ? typeColor : colorMode === 'velocity' ? speedColor(Math.hypot(vx, vy, vz) * 0.977792) : tempValid && Number.isFinite(teff) && teff > 0 ? blackbodyColor(teff) : [0.34, 0.39, 0.47];
     const state=particleStates[i]; Object.assign(state,{x,y,z,vx,vy,vz,mass,type:stellarType,radius,lum,present});
     const markEvent=mergerEvents.some(e=>ids[i]===e.disappearedId && displayFrame>=Math.max(0,e.preIndex-4) && displayFrame<=e.preIndex);
-    if(markEvent){tempColor.setRGB(1,.12,.08);stars.setColorAt(i,tempColor);halos.setColorAt(i,tempColor);}
     tempColor.setRGB(colour[0], colour[1], colour[2]); stars.setColorAt(i, tempColor);
     tempColor.setRGB(colour[0], colour[1], colour[2]); halos.setColorAt(i, tempColor);
+    if(markEvent){tempColor.setRGB(1,.08,.05);stars.setColorAt(i,tempColor);halos.setColorAt(i,tempColor);}
     const logLum = tempValid ? THREE.MathUtils.clamp(Math.log10(lum + 1) / 5, 0.12, 1) : 0;
     const diffractionSize = present && !isCenter ? visualRadius * (14 + logLum * 10) : 0;
     renderedPositions[i * 3] = x; renderedPositions[i * 3 + 1] = y; renderedPositions[i * 3 + 2] = z; renderedDiffractionSizes[i] = diffractionSize;
