@@ -112,7 +112,7 @@ let cameraQuaternion = new THREE.Quaternion();
 const lastDiffractionOrientation = new THREE.Quaternion(0, 0, 0, 0);
 const selectionRing = new THREE.Mesh(new THREE.TorusGeometry(.00066,.000045,8,40),new THREE.MeshBasicMaterial({color:'#8ff5e8',toneMapped:false,depthTest:false})); selectionRing.visible=false; selectionRing.renderOrder=7; scene.add(selectionRing);
 const selectionGlow = new THREE.Mesh(new THREE.SphereGeometry(.00022,18,12),new THREE.MeshBasicMaterial({color:'#65f5df',transparent:true,opacity:.25,blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,depthTest:false}));selectionGlow.visible=false;selectionGlow.renderOrder=6;scene.add(selectionGlow);
-const eventTrails = mergerEvents.map(e=>{const geometry=new THREE.BufferGeometry();const slot=idToIndex.get(e.incomingId),start=Math.max(0,e.preIndex-4);const pts:THREE.Vector3[]=[];if(slot!==undefined)for(let f=start;f<=e.preIndex;f++){const o=(f*meta.particleCount+slot)*FIELDS;if(data[o+10]>.5)pts.push(new THREE.Vector3(data[o],data[o+1],data[o+2]));}geometry.setFromPoints(pts);const material=new THREE.LineBasicMaterial({color:'#ff514b',transparent:true,opacity:.9});const line=new THREE.Line(geometry,material);line.visible=false;line.renderOrder=5;scene.add(line);return line;});
+const eventTrails = mergerEvents.map(e=>{const geometry=new THREE.BufferGeometry(),slot=idToIndex.get(e.incomingId),frameIndices:number[]=[];if(slot!==undefined)for(let f=0;f<=e.preIndex;f++){const o=(f*meta.particleCount+slot)*FIELDS;if(data[o+10]>.5)frameIndices.push(f);}const positions=new Float32Array((frameIndices.length+1)*3);frameIndices.forEach((f,i)=>{const o=(f*meta.particleCount+slot!)*FIELDS;positions.set([data[o],data[o+1],data[o+2]],i*3);});const attribute=new THREE.BufferAttribute(positions,3);attribute.setUsage(THREE.DynamicDrawUsage);geometry.setAttribute('position',attribute);geometry.setDrawRange(0,0);const material=new THREE.LineBasicMaterial({color:'#ff9429',transparent:true,opacity:.3});const line=new THREE.Line(geometry,material);line.userData.frameIndices=frameIndices;line.userData.slot=slot;line.userData.event=e;line.visible=false;line.renderOrder=5;scene.add(line);return line;});
 function setMatrix(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, scale: number, quaternion = dummy.quaternion) {
   dummy.position.set(x, y, z); dummy.quaternion.copy(quaternion); dummy.scale.setScalar(scale); dummy.updateMatrix(); mesh.setMatrixAt(index, dummy.matrix);
 }
@@ -120,9 +120,10 @@ function putFrame(position: number, updateUi = true) {
   framePosition = THREE.MathUtils.clamp(position, 0, meta.frameCount - 1);
   const lower = Math.floor(framePosition), upper = Math.min(lower + 1, meta.frameCount - 1), alpha = framePosition - lower;
   const mode = (document.querySelector<HTMLSelectElement>('#interpolation')!).value;
-  const continuous = lower !== upper && mode !== 'raw' && meta.centerIds[lower] === meta.centerIds[upper] && meta.counts[lower] === meta.counts[upper];
+  const continuous = lower !== upper && mode !== 'raw';
   const displayFrame = continuous ? (alpha < 0.5 ? lower : upper) : mode === 'raw' ? Math.round(framePosition) : (alpha < 0.5 ? lower : upper);
   const centerIndex = idToIndex.get(meta.centerIds[displayFrame]);
+  const centerChanged=meta.centerIds[lower]!==meta.centerIds[upper],lowerCenterIndex=idToIndex.get(meta.centerIds[lower]),upperCenterIndex=idToIndex.get(meta.centerIds[upper]);
   const colorMode = (document.querySelector<HTMLSelectElement>('#colour-mode')!).value;
   const t0 = meta.timeMyr[lower], t1 = meta.timeMyr[upper], dt = t1 - t0;
   const timeMyr = mode === 'raw' ? meta.timeMyr[Math.round(framePosition)] : THREE.MathUtils.lerp(t0, t1, alpha);
@@ -136,6 +137,7 @@ function putFrame(position: number, updateUi = true) {
     const chosen = continuous ? (alpha < 0.5 ? o0 : o1) : displayFrame * meta.particleCount * FIELDS + i * FIELDS;
     const present0 = data[o0 + 10] > 0.5, present1 = data[o1 + 10] > 0.5;
     const interpolateParticle = continuous && present0 && present1;
+    const fadingAppearance=continuous&&!present0&&present1;
     let present = interpolateParticle || data[chosen + 10] > 0.5;
     let x = present ? data[chosen] : 0, y = present ? data[chosen + 1] : 0, z = present ? data[chosen + 2] : 0;
     if (interpolateParticle) {
@@ -147,15 +149,17 @@ function putFrame(position: number, updateUi = true) {
         x = THREE.MathUtils.lerp(data[o0], data[o1], alpha); y = THREE.MathUtils.lerp(data[o0 + 1], data[o1 + 1], alpha); z = THREE.MathUtils.lerp(data[o0 + 2], data[o1 + 2], alpha);
       }
     }
-    const isCenter = i === centerIndex;
-    const mass = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 6], data[o1 + 6], alpha) : data[chosen + 6];
-    const lum = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 9], data[o1 + 9], alpha) : data[chosen + 9];
-    const radius = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 8], data[o1 + 8], alpha) : data[chosen + 8];
+    const isCenter = !centerChanged&&i === centerIndex;
+    const centerFade=centerChanged?(i===lowerCenterIndex?alpha:i===upperCenterIndex?1-alpha:1):isCenter?0:1;
+    const mass = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 6], data[o1 + 6], alpha) : fadingAppearance?data[o1+6]:data[chosen + 6];
+    const lum = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 9], data[o1 + 9], alpha) : fadingAppearance?data[o1+9]:data[chosen + 9];
+    const radius = interpolateParticle ? THREE.MathUtils.lerp(data[o0 + 8], data[o1 + 8], alpha) : fadingAppearance?data[o1+8]:data[chosen + 8];
     const eventForParticle=mergerEvents.find(e=>e.incomingId===ids[i]&&e.preIndex===lower&&e.postIndex===upper);
     const fadingIncoming=Boolean(eventForParticle&&present0&&!present1&&timeMyr<t1);
-    let eventFade=1;
+    let eventFade=fadingAppearance?alpha:1;
     if(fadingIncoming&&eventForParticle){present=true;eventFade=1-THREE.MathUtils.clamp((timeMyr-t0)/Math.max(t1-t0,1e-12),0,1);const elapsed=Math.max(0,timeMyr-t0);x=data[o0]+data[o0+3]*elapsed;y=data[o0+1]+data[o0+4]*elapsed;z=data[o0+2]+data[o0+5]*elapsed;}
-    const visualRadius = isCenter ? 0 : present ? (0.00011 + Math.min(0.00009, Math.log10(Math.max(1, mass)) * 0.000035))*eventFade : 0;
+    if(fadingAppearance){present=alpha>0;const elapsed=Math.max(0,t1-timeMyr);x=data[o1]-data[o1+3]*elapsed;y=data[o1+1]-data[o1+4]*elapsed;z=data[o1+2]-data[o1+5]*elapsed;}
+    const visualRadius = present ? (0.00011 + Math.min(0.00009, Math.log10(Math.max(1, mass)) * 0.000035))*eventFade*centerFade : 0;
     setMatrix(stars, i, x, y, z, visualRadius);
     setMatrix(halos, i, x, y, z, visualRadius * 2.35);
     const tempValid = Number.isFinite(lum) && Number.isFinite(radius) && lum > 0 && radius > 0;
@@ -185,7 +189,7 @@ function putFrame(position: number, updateUi = true) {
   const time = timeMyr * 1e6;
   const snapshotLabel = continuous && alpha > 0.005 ? `BETWEEN ${lower}–${upper} · ${mode.toUpperCase()}` : `SNAPSHOT ${String(displayFrame).padStart(3, '0')} / ${meta.frameCount - 1}`;
   updateSelectionIndicator();
-  updateEventTrails(displayFrame,nextEventForView?.incomingId);
+  updateEventTrails(framePosition,nextEventForView?.incomingId);
   if (!updateUi) return;
   document.querySelector('#time-value')!.textContent = `${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} yr`;
   document.querySelector('#snapshot-value')!.textContent = snapshotLabel;
@@ -200,7 +204,7 @@ function putFrame(position: number, updateUi = true) {
   document.querySelector('#frame-summary')!.textContent = `${snapshotLabel} · ${time.toLocaleString('en-US', { maximumFractionDigits: 1 })} YR`;
   document.querySelector('#mass-chart-current')!.textContent=`${time.toLocaleString('en-US',{maximumFractionDigits:0})} yr`;
   updateTargetMonitor(); drawMassChart(framePosition);
-  const eventNow=mergerEvents.find(e=>displayFrame>=e.preIndex&&displayFrame<=e.postIndex);
+  const eventNow=mode==='raw'?mergerEvents.find(e=>displayFrame===e.preIndex):mergerEvents.find(e=>lower===e.preIndex&&upper===e.postIndex);
   const eventLabel=document.querySelector('#merger-label') as HTMLDivElement;
   eventLabel.textContent=eventNow?`MERGER SNAPSHOT WINDOW · INCOMING ID ${eventNow.incomingId} → SURVIVOR ID ${eventNow.survivorId} · ${eventNow.label.toUpperCase()}`:'';
   eventLabel.classList.toggle('active',Boolean(eventNow));
@@ -276,7 +280,7 @@ eventSelect.addEventListener('change',()=>{const index=Number(eventSelect.value)
 const bseCodes=meta.stellarTypeCodes??[];
 document.querySelector('#bse-note')!.textContent=`Snapshot BSE type code${bseCodes.length===1?'':'s'}: ${bseCodes.join(', ')||'not present'}${bseCodes.length===1&&bseCodes[0]===1?' (main sequence throughout this archive). ':'. '}Effective temperature uses BSE luminosity and radius.`;
 
-function updateEventTrails(displayFrame:number,nextIncomingId?:number){eventTrails.forEach((line,ei)=>{const e=mergerEvents[ei];line.visible=displayFrame>=Math.max(0,e.preIndex-4)&&displayFrame<=e.preIndex;(line.material as THREE.LineBasicMaterial).color.set(e.incomingId===nextIncomingId?'#ff3025':'#ff9429');});}
+function updateEventTrails(position:number,nextIncomingId?:number){eventTrails.forEach(line=>{const frames=line.userData.frameIndices as number[],slot=line.userData.slot as number|undefined,e=line.userData.event as MergerEvent,geometry=line.geometry,attribute=geometry.getAttribute('position') as THREE.BufferAttribute;let lo=0,hi=frames.length;while(lo<hi){const mid=(lo+hi)>>1;if(frames[mid]<=position)lo=mid+1;else hi=mid;}let count=lo;if(slot!==undefined&&count>0&&position>frames[count-1]&&particleStates[slot].present){const p=particleStates[slot],offset=count*3;attribute.array[offset]=p.x;attribute.array[offset+1]=p.y;attribute.array[offset+2]=p.z;attribute.needsUpdate=true;count++;}geometry.setDrawRange(0,count);line.visible=count>1;const material=line.material as THREE.LineBasicMaterial;const isNext=e.incomingId===nextIncomingId;material.color.set(isNext?'#ff3025':'#ff9429');material.opacity=isNext?.85:.3;});}
 function updateTargetMonitor(){
   const status=document.querySelector('#target-status')!,box=document.querySelector('#target-details')!;
   if(selectedIndex<0){status.textContent='CLICK A STAR';box.innerHTML='<span>Select a particle in the 3D view to follow its motion and BSE properties.</span>';return;}
