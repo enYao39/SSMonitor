@@ -43,12 +43,49 @@ def main():
                 frames[fi,slot,0:3]=row[1:4]-c[1:4]
                 frames[fi,slot,3:6]=row[4:7]-c[4:7]
                 frames[fi,slot,6]=row[0]
-                frames[fi,slot,7]=row[12]  # SSE/BSE stellar type, 1-based column 13
+                frames[fi,slot,7]=row[12]  # SSE/BSE stellar type code, 1-based column 13
                 frames[fi,slot,8]=row[15]  # BSE radius in R_sun, 1-based column 16
                 frames[fi,slot,9]=row[23]  # luminosity in L_sun, 1-based column 24
                 frames[fi,slot,10]=1
+        # Snapshot-to-snapshot merger candidates: a disappearing object and a
+        # simultaneous mass jump in a surviving object. This is a bracket, not
+        # an exact collision timestamp or a BSE event log.
+        events=[]
+        for fi in range(1,len(raw)):
+            before=frames[fi-1,:,10]>.5; after=frames[fi,:,10]>.5
+            common=before & after
+            if not np.any(common): continue
+            candidate_slots=np.flatnonzero(common)
+            gains=frames[fi,candidate_slots,6]-frames[fi-1,candidate_slots,6]
+            survivor_slot=int(candidate_slots[int(np.argmax(gains))]); gain=float(np.max(gains))
+            for lost_slot in np.flatnonzero(before & ~after):
+                if gain < 2.0: continue
+                survivor_id=int(ids[survivor_slot]); is_center=survivor_id==centers[fi]
+                events.append({'preIndex':fi-1,'postIndex':fi,'timeStartMyr':float(times[fi-1]),'timeEndMyr':float(times[fi]),'disappearedId':int(ids[lost_slot]),'survivorId':survivor_id,'survivorMassGainMsun':gain,'centralMergerCandidate':bool(is_center),'label':'VMS-associated candidate' if is_center else 'companion merger candidate'})
+        # Prefer the BSE event log when present: it gives event times and the
+        # two participating particle IDs, unlike snapshot-only mass inference.
+        bse_member=next((m for m in archive.getmembers() if Path(m.name).name.startswith('data.bse.')),None)
+        if bse_member is not None:
+            stream=archive.extractfile(bse_member)
+            if stream is not None:
+                exact=[]
+                for line in stream:
+                    fields=line.decode('ascii',errors='replace').split()
+                    if len(fields)<52 or fields[0]!='Coalescence': continue
+                    event_time=float(fields[2]); participants=[int(float(fields[50])),int(float(fields[51]))]
+                    pre=max(0,min(len(times)-2,int(np.searchsorted(times,event_time,side='right')-1))); post=pre+1
+                    slot_by_id={int(pid):id_to_slot.get(int(pid)) for pid in participants}
+                    lost=[pid for pid,slot in slot_by_id.items() if slot is not None and frames[pre,slot,10]>.5 and frames[post,slot,10]<.5]
+                    if lost: incoming=lost[0]; survivor=next((pid for pid in participants if pid!=incoming),participants[0])
+                    else:
+                        masses=[frames[pre,id_to_slot[pid],6] if id_to_slot.get(pid) is not None else float('inf') for pid in participants]
+                        incoming=participants[int(np.argmin(masses))]; survivor=participants[1] if incoming==participants[0] else participants[0]
+                    central=survivor==centers[post]
+                    exact.append({'preIndex':pre,'postIndex':post,'timeStartMyr':float(times[pre]),'timeEndMyr':float(times[post]),'eventTimeMyr':event_time,'disappearedId':incoming,'survivorId':survivor,'participantIds':participants,'survivorMassGainMsun':None,'centralMergerCandidate':bool(central),'source':'BSE Coalescence','label':'VMS-associated BSE coalescence' if central else 'BSE coalescence'})
+                if exact: events=exact
+        (args.out/'events.json').write_text(json.dumps(events,separators=(',',':'))+'\n')
         binary=args.out/'snapshots.bin'; frames.tofile(binary)
-        metadata={'format':'petar-interleaved-f32-v1','fields':['x_pc_relative_to_vms','y_pc_relative_to_vms','z_pc_relative_to_vms','vx_pc_myr_relative_to_vms','vy_pc_myr_relative_to_vms','vz_pc_myr_relative_to_vms','mass_msun','stellar_type','bse_radius_rsun','luminosity_lsun','present'],'frameCount':len(raw),'particleCount':len(ids),'particleIds':ids.tolist(),'timeMyr':times.tolist(),'counts':counts,'centerIds':centers,'centerMassMsun':[c['center_mass_msun'] for c in checks],'units':{'position':'pc relative to most massive particle in each snapshot','velocity':'pc/Myr relative to most massive particle','time':'Myr','mass':'Msun','bseRadius':'Rsun','luminosity':'Lsun'},'source':'n200_fixedwind_raw_t0-0p07893Myr.tar.gz','summary':{'snapshotCount':len(raw),'firstTimeYr':float(times[0]*1e6),'lastTimeYr':float(times[-1]*1e6),'strictlyIncreasing':True,'idUniquenessPerSnapshot':True,'uniqueParticleIds':len(ids),'firstCenterId':centers[0],'lastCenterId':centers[-1],'firstCenterMassMsun':checks[0]['center_mass_msun'],'lastCenterMassMsun':checks[-1]['center_mass_msun'],'binaryBytes':binary.stat().st_size}}
+        metadata={'format':'petar-interleaved-f32-v1','fields':['x_pc_relative_to_vms','y_pc_relative_to_vms','z_pc_relative_to_vms','vx_pc_myr_relative_to_vms','vy_pc_myr_relative_to_vms','vz_pc_myr_relative_to_vms','mass_msun','stellar_type','bse_radius_rsun','luminosity_lsun','present'],'frameCount':len(raw),'particleCount':len(ids),'particleIds':ids.tolist(),'timeMyr':times.tolist(),'counts':counts,'centerIds':centers,'centerMassMsun':[c['center_mass_msun'] for c in checks],'stellarTypeCodes':sorted(map(int,np.unique(frames[:,:,7][frames[:,:,10]>.5]))),'units':{'position':'pc relative to most massive particle in each snapshot','velocity':'pc/Myr relative to most massive particle','time':'Myr','mass':'Msun','bseRadius':'Rsun','luminosity':'Lsun'},'source':'n200_fixedwind_raw_t0-0p07893Myr.tar.gz','summary':{'snapshotCount':len(raw),'firstTimeYr':float(times[0]*1e6),'lastTimeYr':float(times[-1]*1e6),'strictlyIncreasing':True,'idUniquenessPerSnapshot':True,'uniqueParticleIds':len(ids),'firstCenterId':centers[0],'lastCenterId':centers[-1],'firstCenterMassMsun':checks[0]['center_mass_msun'],'lastCenterMassMsun':checks[-1]['center_mass_msun'],'binaryBytes':binary.stat().st_size}}
         (args.out/'metadata.json').write_text(json.dumps(metadata,separators=(',',':'))+'\n')
         print(json.dumps(metadata['summary'],indent=2))
 if __name__=='__main__': main()
